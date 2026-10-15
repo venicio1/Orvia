@@ -42,6 +42,17 @@ A Fase 1A está aprovada para desenvolvimento local, mas ainda falta validar man
 
 Funcionalidades posteriores deverão testar filas, fuso/horário de verão, idempotência, limites externos, respostas inválidas da IA e fontes sem evidência.
 
+## Conexão Meta (primeira entrega Fase 1C)
+
+- `apps/api/test/social-integrations.spec.ts`: configuração ausente, scopes mínimos, state associado à sessão, recusa de state não confiável, troca mockada de authorization code, checagem de permissões, conexão idempotente por chave composta, descoberta alternativa por ID com token cifrado, recusa de campos públicos sem Page Access Token, isolamento de usuário/sessão, replay de state, persistência do histórico e desconexão escopada ao usuário.
+- `apps/api/test/social-token-crypto.spec.ts`: round-trip AES-256-GCM, IV aleatório, adulteração, chave errada e comprimento inválido.
+- `apps/web/src/components/meta-connection-panel.test.tsx`: estado não configurado sem botão falso, estado autorizado, mensagem de callback e ação de desconexão pela UI.
+- Esses unit tests usam respostas mockadas somente no ambiente de teste e não indicam conexão real. A UI não usa fixtures para preencher contas.
+- `apps/api/test/social-integrations.integration.spec.ts` é opcional (requer `RUN_DB_INTEGRATION=1`) e valida transação, cifragem, descoberta alternativa por ID, histórico, isolamento de desconexão e apagamento de token em PostgreSQL real. Foi executado com PostgreSQL local ativo.
+- Migrações `20261015203000_meta_social_connections`, `20261015204500_diagnostic_fk_constraint_name`, `20261015210000_social_account_owner_constraint`, `20261015211000_oauth_session_owner_constraint` e `20261016100000_meta_page_id_discovery` estão aplicadas no PostgreSQL local. A última acrescenta campos de descoberta temporária cifrada e controle de tentativas; nenhuma remove dados.
+- Em 2026-10-15, o proprietário confirmou manualmente um OAuth real no navegador: `@unicstreetbr`, Página `Orvia Testes`, status conectado e escopos esperados. `/me/accounts` veio vazio e a conexão foi completada pelo fallback por ID. A API foi consultada novamente no banco e pelo serviço de status, sem selecionar/exibir o token.
+- Testes com Meta real não devem registrar tokens, authorization codes, query completa ou resposta bruta. Não usar produção nem contas de pacientes. Conectar somente conta profissional de teste controlada. Essa confirmação não valida métricas, Insights, Business Discovery ou hashtags, que continuam fora da Fase 1C.
+
 ## Diagnóstico profissional e estratégia inicial (Fase 1B)
 
 - Unitários puros em `apps/api/test/diagnostic.engine.spec.ts`: fórmula/dimensões, versionamento do critério, ausência de dados externos inventados, campos desconhecidos, limite de três prioridades, zero e baixa disponibilidade e salvaguardas gerais.

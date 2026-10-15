@@ -19,6 +19,9 @@ model User {
   authTokens     AuthToken[]
   diagnostics    Diagnostic[]
   strategies     Strategy[]
+  metaOAuthAttempts MetaOAuthAttempt[]
+  socialAccounts SocialAccount[]
+  socialSyncRuns SocialSyncRun[]
 
   @@map("users")
 }
@@ -57,9 +60,77 @@ model Session {
   expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   userAgent String? @map("user_agent") @db.VarChar(512)
+  metaOAuthAttempts MetaOAuthAttempt[]
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([id, userId])
   @@index([userId, expiresAt])
   @@map("sessions")
+}
+
+model MetaOAuthAttempt {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  sessionId   String    @map("session_id") @db.Uuid
+  stateHash   String    @unique @map("state_hash") @db.VarChar(64)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(3)
+  pageDiscoveryTokenCiphertext String? @map("page_discovery_token_ciphertext") @db.Text
+  pageDiscoveryScopes String[] @default([]) @map("page_discovery_scopes")
+  pageDiscoveryExpiresAt DateTime? @map("page_discovery_expires_at") @db.Timestamptz(3)
+  pageDiscoveryConsumedAt DateTime? @map("page_discovery_consumed_at") @db.Timestamptz(3)
+  pageDiscoveryAttempts Int @default(0) @map("page_discovery_attempts")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session     Session   @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([sessionId, expiresAt])
+  @@index([userId, pageDiscoveryExpiresAt])
+  @@map("meta_oauth_attempts")
+}
+
+model SocialAccount {
+  id                    String          @id @default(uuid()) @db.Uuid
+  userId                String          @map("user_id") @db.Uuid
+  provider              String          @db.VarChar(40)
+  providerAccountId     String          @map("provider_account_id") @db.VarChar(128)
+  pageId                String          @map("page_id") @db.VarChar(128)
+  pageName              String?         @map("page_name") @db.VarChar(255)
+  username              String?         @db.VarChar(255)
+  grantedScopes         String[]        @default([]) @map("granted_scopes")
+  accessTokenCiphertext String?         @map("access_token_ciphertext") @db.Text
+  tokenExpiresAt        DateTime?       @map("token_expires_at") @db.Timestamptz(3)
+  status                String          @default("connected") @db.VarChar(32)
+  connectedAt           DateTime        @default(now()) @map("connected_at") @db.Timestamptz(3)
+  disconnectedAt        DateTime?       @map("disconnected_at") @db.Timestamptz(3)
+  createdAt             DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  syncRuns              SocialSyncRun[]
+
+  @@unique([userId, provider, providerAccountId])
+  @@unique([id, userId])
+  @@index([userId, provider, status])
+  @@map("social_accounts")
+}
+
+model SocialSyncRun {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @map("user_id") @db.Uuid
+  socialAccountId String?        @map("social_account_id") @db.Uuid
+  provider        String         @db.VarChar(40)
+  operation       String         @db.VarChar(64)
+  status          String         @db.VarChar(24)
+  startedAt       DateTime       @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt      DateTime?      @map("finished_at") @db.Timestamptz(3)
+  recordsRead     Int            @default(0) @map("records_read")
+  errorCode       String?        @map("error_code") @db.VarChar(64)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([userId, provider, startedAt])
+  @@index([socialAccountId, startedAt])
+  @@map("social_sync_runs")
 }
 
 model AuthToken {

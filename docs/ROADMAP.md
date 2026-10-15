@@ -36,7 +36,19 @@
 
 **Status:** concluída e aprovada para continuidade do desenvolvimento local em 2026-10-15. Migration aplicada; testes unitários, integração PostgreSQL, fluxo E2E, `pnpm check`, isolamento e validação do fluxo no navegador executados. Desktop e celular foram conferidos visualmente. A conferência visual completa em tablet continua pendente porque a captura nessa viewport apresentou duplicação da página; as medições no navegador indicaram que não há rolagem horizontal. Essa pendência não bloqueia as próximas fases e deve ser revisitada antes da publicação de produção. A pontuação não representa desempenho, qualidade profissional, procura, alcance nem probabilidade de crescimento. Campos ausentes não são tratados como fatos negativos.
 
-**Fora desta autorização e não iniciados:** inteligência de mercado/fontes externas, métricas ou integração social, mentor/IA, jornadas/desafios, planejamento completo de conteúdo, análise de conversão/resultados, revisão semanal/relatórios e outras fases. Não coletar dados clínicos de pacientes.
+**Fora da Fase 1B:** inteligência de mercado/fontes externas, sincronização de métricas ou conteúdo social, mentor/IA, jornadas/desafios, planejamento completo de conteúdo, análise de conversão/resultados, revisão semanal/relatórios e outras fases. A Fase 1C abaixo cobre somente a fundação de autorização Meta; não altera diagnóstico nem coleta dados clínicos de pacientes.
+
+### Fase 1C — Fundação de conexão Meta (concluída para desenvolvimento local)
+
+**Escopo desta entrega:** estrutura isolada `social-integrations`; conexão oficial por OAuth Facebook Login somente leitura; estados real/configurado/não configurado; state OAuth curto, vinculado a usuário/sessão e de uso único; descoberta de contas profissionais associadas a Pages do usuário; persistência Prisma/PostgreSQL de conexão, token cifrado e histórico de execução; desconexão com apagamento do token; UI em Configurações; testes automatizados e documentação para App Review.
+
+**Não incluído:** sincronização de publicações/Insights, Business Discovery, hashtag search, fontes de notícias/pesquisa/tendências, recomendações de mercado, scraping, IA, publicação ou demais módulos posteriores.
+
+**Permissões solicitadas quando habilitada:** `pages_show_list`, `instagram_basic`, `pages_read_engagement`. `instagram_manage_insights` ficará para uma entrega que realmente consulte Insights. Business Discovery/hashtags e requisitos de Advanced Access/App Review precisam ser confirmados no painel Meta antes de serem adicionados.
+
+**Estado desta entrega:** concluída para desenvolvimento local em 2026-10-15. `pnpm check`, testes PostgreSQL e migrações foram validados. O proprietário concluiu um OAuth real e confirmou no Orvia a conta profissional `@unicstreetbr`, Página `Orvia Testes`, status conectada e escopos `pages_show_list`, `instagram_basic`, `pages_read_engagement`. Nesta conta, `/me/accounts` retornou vazio; o fallback oficial por ID de Página consultou a Graph API com o token OAuth da sessão, recebeu Page Access Token e Instagram vinculado, e a conexão foi persistida. Nenhum token foi compartilhado ou impresso nesta verificação.
+
+**Pendências antes de produção e de fases de coleta:** App Review/Advanced Access e Business Verification conforme requisitos vigentes; política de privacidade e exclusão aplicável à conexão; operação de segredos, backups e deploy; estratégia de reautorização quando Meta invalidar ou revogar tokens. Insights, Business Discovery, hashtag search, fontes de mercado e IA permanecem fora desta fase e exigem revisão técnica e autorização próprias.
 
 ## Fase 2 — Consolidação
 

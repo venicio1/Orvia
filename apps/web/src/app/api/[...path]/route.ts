@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 async function proxy(request: NextRequest) {
   const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
   const path = request.nextUrl.pathname.replace(/^\/api\//, "");
-  if (!path.startsWith("auth/") && !path.startsWith("diagnostics")) return Response.json({ code: "not_found", message: "Rota não encontrada." }, { status: 404 });
+  if (!path.startsWith("auth/") && !path.startsWith("diagnostics") && !path.startsWith("integrations/")) return Response.json({ code: "not_found", message: "Rota não encontrada." }, { status: 404 });
   const headers = new Headers();
   for (const name of ["content-type", "cookie", "origin", "x-csrf-token", "user-agent", "x-forwarded-for"]) {
     const value = request.headers.get(name);
@@ -17,10 +17,18 @@ async function proxy(request: NextRequest) {
       headers,
       body: ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer(),
       cache: "no-store",
+      // OAuth callback redirects must reach the browser, which owns the Orvia cookies.
+      // Following the redirect here drops the browser's cookie context and can turn the
+      // callback into an apparent logout at the server-rendered destination.
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
     const outputHeaders = new Headers({ "content-type": response.headers.get("content-type") ?? "application/json", "cache-control": "no-store" });
     for (const cookie of response.headers.getSetCookie()) outputHeaders.append("set-cookie", cookie);
+    const location = response.headers.get("location");
+    if (location) outputHeaders.set("location", location);
+    const referrerPolicy = response.headers.get("referrer-policy");
+    if (referrerPolicy) outputHeaders.set("referrer-policy", referrerPolicy);
     return new Response(response.body, { status: response.status, headers: outputHeaders });
   } catch {
     return Response.json({ code: "api_unavailable", message: "O serviço Orvia está indisponível no momento." }, { status: 503 });

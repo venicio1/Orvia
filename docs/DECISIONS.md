@@ -82,3 +82,17 @@ Decisões pendentes não bloqueiam a fundação, mas bloqueiam a ativação dos 
 ### D-016 — Plano inicial limitado pela disponibilidade
 
 **Decisão:** recomendar até três prioridades; ajustar esforço ao tempo informado. Zero horas não agenda execução e tempo desconhecido pede preenchimento antes de planejar tarefas. Incluir salvaguardas gerais, sem afirmar interpretação legal específica. **Motivo:** reduzir pressão, incompatibilidade de esforço e orientação regulatória sem contexto suficiente.
+
+## Fase 1C — conexão Meta
+
+### D-017 — Conexão inicial via Facebook Login, leitura mínima
+
+**Decisão:** a fundação Meta usa OAuth Facebook Login por ser o caminho oficial alinhado à futura avaliação de Business Discovery/hashtags. A primeira entrega pede somente `pages_show_list`, `instagram_basic`, `pages_read_engagement`, enumera contas profissionais vinculadas a Pages acessíveis e permite desconectar. Se `/me/accounts` vier vazio, aceita um ID de Página como seletor, mas só conecta após a Graph API autenticada devolver o Page Access Token e Instagram vinculado; não solicita tokens manuais nem `business_management`. Não solicita `instagram_manage_insights` antes de implementar leitura de Insights, nem publicação, comentários, mensagens, anúncios ou permissões amplas de negócio. **Motivo:** testar identidade e vínculo da conta com menor privilégio e sem afirmar acesso a funcionalidades ainda não aprovadas. Um teste real foi confirmado em 2026-10-15 pelo fallback por ID.
+
+### D-018 — OAuth no backend e credenciais cifradas
+
+**Decisão:** authorization-code com `state` aleatório persistido somente como hash, vinculado à sessão e usuário, TTL 10 minutos, consumo único; token exchange e chamadas Graph só no backend; tokens de Page armazenados com AES-256-GCM e chave de 32 bytes separada do App Secret; desconexão apaga ciphertext e escopos. Sem configuração completa, integração é indisponível e não faz chamadas externas. **Motivo:** reduzir CSRF, replay e exposição de credenciais no frontend/logs.
+
+### D-019 — Recursos condicionais à revisão da Meta
+
+**Decisão:** Insights, Business Discovery e hashtag search são fases posteriores, condicionadas à documentação da versão, access level, permissões e decisões atuais do painel/App Review. **Motivo:** a documentação descreve capacidades de plataforma, mas não prova que o aplicativo Orvia recebeu autorização para usá-las.

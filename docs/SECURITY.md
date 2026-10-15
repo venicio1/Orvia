@@ -40,6 +40,18 @@ A Fase 1A está concluída para desenvolvimento local, não para lançamento pú
 
 Contexto mínimo necessário, prompts versionados, saídas estruturadas validadas e proveniência explícita. Resistir a instruções maliciosas em conteúdo externo; esse conteúdo é dado, não instrução de sistema. Não alegar causalidade ou resultado garantido.
 
+## Integração Meta — conexão inicial
+
+- Somente OAuth oficial authorization-code via Facebook Login. `state` criptograficamente aleatório, hash persistido, atrelado a usuário/sessão, expira em 10 minutos e é consumido uma vez antes da chamada externa. Início e desconexão exigem origem estrita e CSRF; callback exige a sessão original e state válido.
+- Solicitar apenas `pages_show_list`, `instagram_basic`, `pages_read_engagement`. `instagram_manage_insights`, publicação, comentários, mensagens, anúncios e permissões de negócio não são solicitados nesta entrega.
+- App Secret é usado apenas no backend para o token exchange. Tokens de Page persistidos são cifrados autenticadamente AES-256-GCM, com chave distinta de 32 bytes em `META_TOKEN_ENCRYPTION_KEY`. Não existe fallback para texto claro; sem chave válida a configuração fica desativada. Variáveis Meta não podem usar prefixo `NEXT_PUBLIC_`. Validade de token de Page só é registrada se a API a informar diretamente; validade do token de usuário não é usada como proxy.
+- Se `/me/accounts` vier vazio, o token de usuário usado para validar um ID de Página fica cifrado e vinculado a usuário/sessão por até dez minutos, com cinco tentativas máximas. O token pendente é apagado após sucesso e por limpeza periódica; o ID não é aceito como autorização. O fallback só persiste uma conta quando a consulta Meta autenticada devolve o Page ID solicitado, um Page Access Token e um Instagram profissional vinculado.
+- Nenhum token, state, authorization code, secret, chave ou URL com credenciais deve ser escrito em logs, analytics ou mensagens de erro. Respostas públicas contêm somente IDs/nomes/escopos e estados permitidos.
+- O callback OAuth é excluído do log de requisições de desenvolvimento do Next.js; `fetches.fullUrl` permanece desabilitado para que URLs completas não sejam registradas. A implantação deve configurar proxies e observabilidade para também não registrar query strings de callback.
+- Desconexão no Orvia remove imediatamente token ciphertext e escopos; mantém estado desconectado e histórico de execução sem credenciais. A permissão concedida ao aplicativo continua administrada na conta Meta; a UI orienta a revogação nos controles de aplicativos/integrações da Meta. Fluxo formal de eliminação da conta Meta e retenção final depende de política LGPD e dos termos vigentes da Meta antes da produção.
+- A aplicação não acessa API externa se a configuração estiver incompleta. A conexão real de teste de `@unicstreetbr` foi confirmada em 2026-10-15 com callback permitido e conta profissional vinculada a Página. Mocks não são apresentados como conexão real; validação de produção e de outros endpoints continua pendente.
+- Acesso ao endpoint/escopo não é presumido. App Review, Advanced Access, verificação empresarial e permissões para Insights/Business Discovery/hashtags devem ser confirmados no painel da aplicação.
+
 ## Fase 1B: diagnóstico e estratégia inicial
 
 - As rotas exigem sessão; mutações também exigem origem e CSRF. O cliente não envia `userId`; escopo sempre vem da sessão validada.

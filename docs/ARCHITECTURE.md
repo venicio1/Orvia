@@ -16,7 +16,13 @@ Identity; Professional Profile; Social Integrations; Diagnostics; Market Intelli
 
 ## Dependências
 
-Identity → Profile → Diagnostics → Initial Strategy → (future, separately authorized) Market Intelligence/Planning/Analytics. O motor do diagnóstico da Fase 1B é uma função de domínio determinística, sem dependência do framework web ou APIs externas. Recebe um snapshot tipado do perfil e retorna achados estruturados e estratégia. Uma versão de critérios identifica as regras. Inteligência de mercado, conectores sociais, mentor/IA, desafios e planejamento completo continuam separados e não são implementados nesta autorização.
+Identity → Profile → Diagnostics → Initial Strategy → Social Integrations (conexão autorizada apenas) → (future, separately authorized) Market Intelligence/Planning/Analytics. O motor do diagnóstico da Fase 1B é uma função de domínio determinística, sem dependência do framework web ou APIs externas. Recebe um snapshot tipado do perfil e retorna achados estruturados e estratégia. Uma versão de critérios identifica as regras. Coleta de mercado, sincronização de conteúdo, mentor/IA, desafios e planejamento completo permanecem separados.
+
+### Primeira entrega Meta (conexão apenas)
+
+`social-integrations` é módulo isolado NestJS; a web acessa status, início, resolução de ID de Página e desconexão pelo proxy same-origin. OAuth authorization-code, state ligado à sessão, troca de código e consultas à Meta ficam somente no backend. Se `/me/accounts` vier vazio, um ID informado pelo usuário é validado sob o token da sessão; o ID não prova autorização, e a API exige o Page Access Token e Instagram vinculado na resposta Meta. PostgreSQL persiste conta, escopos concedidos, state, ciphertext temporário com expiração e execuções de conexão/sincronização. Tokens são cifrados AES-256-GCM; nenhuma credencial entra no diagnóstico Fase 1B. A primeira entrega não importa posts/insights nem consulta fontes de mercado.
+
+Permissões iniciais mínimas: `pages_show_list`, `instagram_basic`, `pages_read_engagement`. Insights (`instagram_manage_insights`), Business Discovery e hashtags são recursos futuros, condicionados à verificação no painel Meta e aprovação de acesso necessária. A versão Graph API é configuração explícita; conectar depende de App ID/Secret, URI autorizado e chave de cifragem válidos. Configuração ausente resulta em estado indisponível real.
 
 ## Interface e estados
 

@@ -24,6 +24,14 @@ A Fase 1B acrescenta `diagnostics` e `strategies` pela migração `2026101519000
 - `WeeklyReview` / `WeeklyFeedback` / `MonthlyReport`: janela/fuso, estado de processamento, consolidação e feedback.
 - `Notification`, `Subscription`, `AuditEvent`: preferências e eventos operacionais com dados mínimos.
 
+### Conexão Meta (primeira entrega)
+
+- `MetaOAuthAttempt`: hash SHA-256 do state, proprietário e sessão de origem, validade de dez minutos, consumo; FK composta `(session_id,user_id)` garante que a sessão pertença ao mesmo usuário da tentativa. Quando `/me/accounts` retorna vazio, campos adicionais guardam temporariamente ciphertext do token de usuário, escopos, prazo de dez minutos, consumo e tentativas do fallback por ID. A FK e as consultas da API mantêm a tentativa presa ao mesmo usuário/sessão; o ciphertext temporário é removido ao conectar ou expirar.
+- `SocialAccount`: conta profissional Instagram por usuário/provedor, Page vinculada, nome de usuário, escopos concedidos, token cifrado AES-256-GCM, validade informada, estado e datas de conexão/desconexão. Unicidade por `(user_id, provider, provider_account_id)` evita contas repetidas para o mesmo usuário. Desconectar apaga o ciphertext, escopos e mantém metadados de auditoria operacional mínimos.
+- `SocialSyncRun`: histórico de descoberta OAuth e futuras sincronizações, sem corpo bruto de resposta nem tokens. Guarda operação, estado, timestamps, contagem e código de erro redigido. FK composta `(social_account_id,user_id)` garante que uma execução só se relacione à conta do mesmo proprietário. Desconectar mantém a conta em estado desconectado e preserva o histórico; hard delete de conta ou usuário remove as execuções relacionadas.
+
+As entidades acima não afetam FK, versões ou snapshots de `Diagnostic` e `Strategy`. Insights, posts e observações de mercado ainda não são coletados nesta entrega.
+
 ### Diagnóstico e estratégia inicial (Fase 1B)
 
 - `Diagnostic.profile_snapshot` registra os campos do perfil usados pela versão; o texto livre de público-alvo é reduzido a um marcador de presença para não copiar conteúdo que possa inadvertidamente identificar pacientes. `result` contém pontuação, método, dimensões, evidências declaradas, oportunidades e limitações.
