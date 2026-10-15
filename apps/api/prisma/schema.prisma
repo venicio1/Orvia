@@ -17,6 +17,8 @@ model User {
   profile        ProfessionalProfile?
   sessions       Session[]
   authTokens     AuthToken[]
+  diagnostics    Diagnostic[]
+  strategies     Strategy[]
 
   @@map("users")
 }
@@ -78,4 +80,40 @@ model RateLimitBucket {
   count Int @default(0)
   resetAt DateTime @map("reset_at") @db.Timestamptz(3)
   @@map("rate_limit_buckets")
+}
+
+model Diagnostic {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  version          Int
+  criteriaVersion  String   @map("criteria_version") @db.VarChar(40)
+  profileSnapshot  Json     @map("profile_snapshot") @db.JsonB
+  inputFingerprint String   @map("input_fingerprint") @db.VarChar(64)
+  result           Json     @db.JsonB
+  status           String   @default("current") @db.VarChar(20)
+  reviewedAt       DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy         Strategy?
+
+  @@unique([id, userId])
+  @@unique([userId, version])
+  @@index([userId, status, createdAt])
+  @@map("diagnostics")
+}
+
+model Strategy {
+  id           String     @id @default(uuid()) @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  diagnosticId String     @unique @map("diagnostic_id") @db.Uuid
+  objective    String     @db.VarChar(500)
+  plan         Json       @db.JsonB
+  guardrails   Json       @db.JsonB
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  diagnostic  Diagnostic @relation(fields: [diagnosticId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@unique([diagnosticId, userId])
+  @@map("strategies")
 }

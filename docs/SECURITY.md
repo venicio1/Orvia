@@ -39,3 +39,13 @@ A Fase 1A está concluída para desenvolvimento local, não para lançamento pú
 ## IA e mercado
 
 Contexto mínimo necessário, prompts versionados, saídas estruturadas validadas e proveniência explícita. Resistir a instruções maliciosas em conteúdo externo; esse conteúdo é dado, não instrução de sistema. Não alegar causalidade ou resultado garantido.
+
+## Fase 1B: diagnóstico e estratégia inicial
+
+- As rotas exigem sessão; mutações também exigem origem e CSRF. O cliente não envia `userId`; escopo sempre vem da sessão validada.
+- Listagem, detalhe e revisão incluem o proprietário na consulta. A migração aplica FK composta `strategies(diagnostic_id,user_id)` → `diagnostics(id,user_id)` e índice parcial para apenas uma versão atual.
+- Snapshot contém somente os campos profissionais utilizados, objetivos, experiência/frequência e disponibilidade. O texto livre do público-alvo é reduzido a um marcador de presença para não copiar conteúdo que possa inadvertidamente identificar pacientes. Não coletar relatos identificáveis, dados clínicos de pacientes, credenciais sociais ou dados de audiência.
+- Resultado e salvaguardas vêm de regras locais. Nenhum provedor de IA, scraping, API social ou fonte de mercado é chamado.
+- A interface diferencia declarações, inferências, sugestões e limites. A pontuação mede preenchimento/organização do perfil, nunca desempenho, procura ou previsão.
+- A geração é serializada em transação PostgreSQL; pedido repetido para perfil e critério inalterados retorna a versão atual. Histórico não é reescrito.
+- Salvaguardas são recomendações gerais do produto, não aconselhamento jurídico; orientar a conferir as normas vigentes do conselho profissional.

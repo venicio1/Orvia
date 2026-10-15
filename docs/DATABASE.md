@@ -2,6 +2,8 @@
 
 PostgreSQL e Prisma 7. A migração versionada em `apps/api/prisma/migrations/20261015174248_identity_profile` implementa persistência de identidade e perfil. Nenhum dado clínico de paciente é coletado.
 
+A Fase 1B acrescenta `diagnostics` e `strategies` pela migração `20261015190000_diagnostics_initial_strategy`. O snapshot contém somente campos profissionais usados pelo cálculo. Cada diagnóstico inclui versão sequencial, critérios, fingerprint da entrada, resultado JSON, estado `current`/`superseded` e data opcional de revisão. A estratégia fica associada à versão correspondente; FK composta exige o mesmo `user_id`. Índice parcial permite no máximo um diagnóstico atual por usuário.
+
 ## Entidades
 
 - `User`: e-mail normalizado único, hash de credencial, confirmação e datas.
@@ -21,6 +23,15 @@ PostgreSQL e Prisma 7. A migração versionada em `apps/api/prisma/migrations/20
 - `MentorConversation` / `MentorMessage`: contexto referenciado, modelo, versão de prompt e consumo minimizado.
 - `WeeklyReview` / `WeeklyFeedback` / `MonthlyReport`: janela/fuso, estado de processamento, consolidação e feedback.
 - `Notification`, `Subscription`, `AuditEvent`: preferências e eventos operacionais com dados mínimos.
+
+### Diagnóstico e estratégia inicial (Fase 1B)
+
+- `Diagnostic.profile_snapshot` registra os campos do perfil usados pela versão; o texto livre de público-alvo é reduzido a um marcador de presença para não copiar conteúdo que possa inadvertidamente identificar pacientes. `result` contém pontuação, método, dimensões, evidências declaradas, oportunidades e limitações.
+- `criteria_version` identifica as regras. `orvia-diagnostico-1.1.0`: Fundamentos dá 25 pontos por profissão, especialidade, região e presença de público-alvo; Direção dá 0/50/100 para nenhum/um/dois ou mais objetivos; Rotina dá 50 pontos por experiência e frequência informadas; Disponibilidade dá 100 quando informada (inclusive zero), 0 quando ausente. A média simples das quatro dimensões é arredondada ao inteiro. Disponibilidade mede se foi informada, não sua quantidade; pouca disponibilidade só limita o plano.
+- `input_fingerprint` identifica repetição do mesmo perfil/critério. Advisory lock transacional e índice parcial tornam a criação idempotente em cliques concorrentes e asseguram só uma versão atual.
+- `Strategy.plan` contém objetivo, prioridades, ações, esforço estimado e indicadores; `guardrails` contém as salvaguardas gerais mostradas na interface. Não significa execução, aprovação ou integração.
+- Alteração dos campos relevantes do perfil cria nova versão e marca a anterior como `superseded`; histórico não é sobrescrito. Se o perfil voltar a um estado anterior depois de outra versão, será criada nova versão.
+- Listagem, detalhe e revisão aplicam o `user_id` autenticado; FK composta valida a propriedade entre estratégia e diagnóstico.
 
 ## Integridade e índices
 

@@ -2,7 +2,9 @@
 
 ## Escopo atual
 
-A Fase 1A autorizada inclui identidade, autenticação, sessão, perfil profissional e onboarding progressivo/editável. Não iniciar diagnóstico, pesquisa de mercado, integrações sociais, mentor, desafios, planejamento ou qualquer funcionalidade posterior sem autorização explícita.
+A Fase 1A está concluída para desenvolvimento local. A Fase 1B foi autorizada para implementação nesta etapa, limitada a diagnóstico profissional determinístico e explicável e estratégia inicial baseada exclusivamente no perfil profissional autodeclarado.
+
+Não implementar nesta autorização inteligência de mercado, tendências externas, redes sociais, mentor/IA, desafios/jornadas, planejamento de conteúdo, analytics, conversões, relatórios, integrações externas ou outras fases. Diagnósticos não podem afirmar desempenho ou dados externos sem fonte real; separar declaração, inferência, recomendação e dado ausente. Preservar versões e isolamento por usuário. Não armazenar dados clínicos de pacientes. Não fazer commit/push sem pedido explícito.
 
 ## Comandos
 
@@ -17,7 +19,7 @@ A Fase 1A autorizada inclui identidade, autenticação, sessão, perfil profissi
 
 ## Estrutura
 
-- `apps/web`: Next.js App Router, interface e API proxy somente para health check.
+- `apps/web`: Next.js App Router, interface e API proxy same-origin.
 - `apps/api`: NestJS, endpoints REST e módulos de domínio futuros.
 - `packages/*`: contratos/configurações compartilháveis quando houver consumidor real.
 - `docs`: decisões, arquitetura, fontes, segurança e critérios por fase.

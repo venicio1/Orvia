@@ -68,3 +68,17 @@ Decisões pendentes não bloqueiam a fundação, mas bloqueiam a ativação dos 
 ### D-013 — Cadastro normalizado e tokens de confirmação serializados
 
 **Decisão:** normalizar e-mail para lowercase, preservar unicidade no PostgreSQL e responder ao cadastro com texto uniforme. Cada conta mantém no máximo um token por finalidade; reenvio substitui o anterior sob advisory lock transacional, e a confirmação consome o token atomicamente com a alteração do estado verificado. A política de senha vale para criação/reset, não para autenticação. **Motivo:** impedir duplicação concorrente, reduzir enumeração e tornar reenvios/consumo previsíveis sem aceitar confirmação duplicada.
+
+## Fase 1B
+
+### D-014 — Diagnóstico inicial determinístico
+
+**Decisão:** calcular por função de domínio pura, a partir apenas de campos profissionais autodeclarados. Exibir método, dimensões, evidências, limitações e ausências. Critérios atuais usam `orvia-diagnostico-1.1.0`: Fundamentos dá 25 pontos por profissão, especialidade, região e presença de público-alvo; Direção dá 0/50/100 para zero/um/dois ou mais objetivos; Rotina dá 50 pontos por experiência e frequência informadas; Disponibilidade dá 100 quando informada (inclusive zero), 0 quando ausente. A pontuação final é a média simples das quatro dimensões arredondada ao inteiro. A pontuação representa preenchimento/organização das informações, não qualidade, desempenho, procura ou previsão. **Motivo:** resultado reproduzível e sem alegar acesso a redes ou mercado.
+
+### D-015 — Snapshot e histórico versionado
+
+**Decisão:** persistir snapshot, resultado e estratégia associados em tabelas versionadas. Advisory lock transacional por usuário torna pedidos repetidos idempotentes; mudanças relevantes criam versão e preservam anteriores. **Motivo:** explicar cada resultado após mudanças e evitar duplicatas por clique concorrente.
+
+### D-016 — Plano inicial limitado pela disponibilidade
+
+**Decisão:** recomendar até três prioridades; ajustar esforço ao tempo informado. Zero horas não agenda execução e tempo desconhecido pede preenchimento antes de planejar tarefas. Incluir salvaguardas gerais, sem afirmar interpretação legal específica. **Motivo:** reduzir pressão, incompatibilidade de esforço e orientação regulatória sem contexto suficiente.

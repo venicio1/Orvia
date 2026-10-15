@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 async function proxy(request: NextRequest) {
   const apiUrl = process.env.API_INTERNAL_URL ?? "http://localhost:4000";
   const path = request.nextUrl.pathname.replace(/^\/api\//, "");
-  if (!path.startsWith("auth/")) return Response.json({ code: "not_found", message: "Rota não encontrada." }, { status: 404 });
+  if (!path.startsWith("auth/") && !path.startsWith("diagnostics")) return Response.json({ code: "not_found", message: "Rota não encontrada." }, { status: 404 });
   const headers = new Headers();
   for (const name of ["content-type", "cookie", "origin", "x-csrf-token", "user-agent", "x-forwarded-for"]) {
     const value = request.headers.get(name);

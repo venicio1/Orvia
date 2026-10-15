@@ -9,7 +9,8 @@ export function csrfToken() {
 }
 
 export async function authRequest(path: string, body?: unknown, method = "POST") {
-  const response = await fetch(`/api/auth/${path}`, {
+  const base = path.startsWith("diagnostics") ? "/api/" : "/api/auth/";
+  const response = await fetch(`${base}${path}`, {
     method,
     credentials: "same-origin",
     headers: { "content-type": "application/json", ...(method !== "GET" ? { "x-csrf-token": csrfToken() } : {}) },

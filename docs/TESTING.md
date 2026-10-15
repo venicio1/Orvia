@@ -42,4 +42,13 @@ A Fase 1A está aprovada para desenvolvimento local, mas ainda falta validar man
 
 Funcionalidades posteriores deverão testar filas, fuso/horário de verão, idempotência, limites externos, respostas inválidas da IA e fontes sem evidência.
 
+## Diagnóstico profissional e estratégia inicial (Fase 1B)
+
+- Unitários puros em `apps/api/test/diagnostic.engine.spec.ts`: fórmula/dimensões, versionamento do critério, ausência de dados externos inventados, campos desconhecidos, limite de três prioridades, zero e baixa disponibilidade e salvaguardas gerais.
+- Integração PostgreSQL em `apps/api/test/diagnostics.integration.spec.ts`: repetição concorrente/idempotência, histórico após alteração e isolamento entre proprietários. Executar junto com as demais integrações usando `RUN_DB_INTEGRATION=1` e PostgreSQL local.
+- Fluxo `apps/api/test/auth-flow.e2e.ts`: sessão/CSRF obrigatórios, diagnóstico de perfil parcial, geração concorrente, navegação autenticada, histórico, isolamento, versão nova após alteração relevante e tentativa de leitura cruzada. Requer Web, API e PostgreSQL locais; usa e-mails fictícios aleatórios e os remove ao final.
+- Testes da interface em `apps/web/src/components/diagnostic-workspace.test.tsx`: vazio, carregamento/erro/retentativa, falha ao persistir, explicabilidade, recomendação, feedback de sucesso, semântica do medidor e marcação de revisão. `pnpm check` inclui unitários, lint, tipos e builds.
+- Responsividade verificada por regras CSS para breakpoints de tablet/celular e markup semântico. A captura manual foi feita no desktop; viewport móvel real ainda precisa de validação manual.
+- Validação manual no navegador continua recomendada para leitura em viewport móvel, teclado, contraste e fluxo visual completo. A auditoria exploratória final da Fase 1B não deve ser substituída por sucesso de build.
+
 Não considerar uma funcionalidade concluída por existir uma página. Registrar comandos, resultados e limitações por entrega.

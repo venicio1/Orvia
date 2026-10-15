@@ -24,18 +24,19 @@
 
 **Pendências antes de considerar pronta para produção:** completar manualmente no navegador o ciclo de recuperação e redefinição de senha, incluindo a tentativa de reutilizar o link; escolher/configurar SMTP de produção com TLS, remetente e domínio verificados; provisionar segredos fora do repositório; definir hospedagem, HTTPS, proxy confiável e migrações de deploy; preparar backup/restauração e monitoramento; concluir as revisões operacionais e de privacidade aplicáveis. O Mailpit continua sendo somente local.
 
-A Fase 1B (diagnóstico e crescimento) não foi iniciada e exige autorização separada.
+### Fase 1B — Diagnóstico profissional e estratégia inicial (autorizada em 2026-10-15)
 
-### Fase 1B — Diagnóstico e crescimento (fora do escopo autorizado atual)
+**Escopo desta autorização:** diagnóstico determinístico, explicável e baseado somente no perfil profissional autodeclarado; estratégia inicial compatível com a disponibilidade; histórico versionado; interface autenticada; testes e persistência. Integrações externas não fazem parte desta autorização.
 
-1. Diagnóstico explicável e metodologia versionada.
-2. Fontes de mercado verificadas, observações, evidências e oportunidades.
-3. Estratégias versionadas e aprováveis; desafios e progresso.
-4. Mentor com provedor configurado, contexto estruturado, validação e limites.
-5. Métricas manuais e/ou integração Meta após aprovação e elegibilidade.
-6. Retrospectiva semanal assíncrona, idempotente, com feedback e aprovação humana.
+1. Resumo com pontos de partida, oportunidades, limitações e campos ausentes.
+2. Pontuação limitada ao preenchimento/organização das informações, com dimensões, método e versão dos critérios explícitos.
+3. Até três prioridades, ações iniciais, justificativa, esforço estimado, indicadores simples e salvaguardas gerais de comunicação profissional.
+4. Snapshot do perfil, resultado, versão dos critérios, estratégia, estado e revisão persistidos no PostgreSQL, com isolamento por usuário e geração idempotente.
+5. Interface responsiva e acessível com estados reais de carregamento, erro, vazio, sucesso e histórico.
 
-Cada fluxo requer testes unitários, integração e autorização por usuário; integração externa só se considera entregue quando testada com permissões válidas.
+**Status:** concluída e aprovada para continuidade do desenvolvimento local em 2026-10-15. Migration aplicada; testes unitários, integração PostgreSQL, fluxo E2E, `pnpm check`, isolamento e validação do fluxo no navegador executados. Desktop e celular foram conferidos visualmente. A conferência visual completa em tablet continua pendente porque a captura nessa viewport apresentou duplicação da página; as medições no navegador indicaram que não há rolagem horizontal. Essa pendência não bloqueia as próximas fases e deve ser revisitada antes da publicação de produção. A pontuação não representa desempenho, qualidade profissional, procura, alcance nem probabilidade de crescimento. Campos ausentes não são tratados como fatos negativos.
+
+**Fora desta autorização e não iniciados:** inteligência de mercado/fontes externas, métricas ou integração social, mentor/IA, jornadas/desafios, planejamento completo de conteúdo, análise de conversão/resultados, revisão semanal/relatórios e outras fases. Não coletar dados clínicos de pacientes.
 
 ## Fase 2 — Consolidação
 

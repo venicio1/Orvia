@@ -125,6 +125,24 @@ async function main() {
   assert.equal(saved.status, 200, "perfil parcial salvo com CSRF");
   const savedProfile = (await json(saved)).profile as Record<string, unknown>;
   assert.equal(savedProfile.professionalName, "Profissional de teste", `salvamento parcial persiste nome (${JSON.stringify(savedProfile)})`);
+  assert.equal((await request("/api/diagnostics")).status, 401, "diagnóstico exige sessão");
+  assert.equal((await request("/api/diagnostics", { method: "POST", cookie: accountA.cookie })).status, 400, "geração exige CSRF");
+  assert.equal((await request("/api/diagnostics", { method: "POST", cookie: accountA.cookie, csrf: accountA.csrf, body: { userId: "spoofed" } })).status, 400, "geração recusa escopo ou campos fornecidos pelo cliente");
+  const diagnosticPage = await request("/diagnostico", { cookie: accountA.cookie });
+  assert.equal(diagnosticPage.status, 200, "diagnóstico pode ser usado com onboarding parcial");
+  const [diagnosticResponseA, diagnosticResponseB] = await Promise.all([
+    request("/api/diagnostics", { method: "POST", cookie: accountA.cookie, csrf: accountA.csrf, body: {} }),
+    request("/api/diagnostics", { method: "POST", cookie: accountA.cookie, csrf: accountA.csrf, body: {} }),
+  ]);
+  assert.equal(diagnosticResponseA.status, 201, "diagnóstico é criado com perfil parcial");
+  assert.equal(diagnosticResponseB.status, 201, "pedido repetido é aceito sem falhar");
+  const diagnosticA = (await json(diagnosticResponseA)).diagnostic as Record<string, unknown>;
+  const diagnosticB = (await json(diagnosticResponseB)).diagnostic as Record<string, unknown>;
+  assert.equal(diagnosticA.id, diagnosticB.id, "cliques concorrentes retornam uma única versão");
+  assert.equal(await db.diagnostic.count({ where: { userId: userA.id } }), 1, "concorrência não duplica diagnóstico");
+  const diagnosticHistoryA = (await json(await request("/api/diagnostics", { cookie: accountA.cookie }))).diagnostics as Array<Record<string, unknown>>;
+  assert.equal(diagnosticHistoryA.length, 1, "histórico lista a versão persistida");
+  assert.equal((diagnosticHistoryA[0]?.result as Record<string, unknown>).scoreLabel, "Organização das informações do perfil", "a pontuação declara o que representa");
   const onboardingPage = await request("/onboarding", { cookie: accountA.cookie });
   assert.equal(onboardingPage.status, 200, "onboarding retoma com a sessão ativa");
   assert.match(await onboardingPage.text(), /Etapa 3 de 5/, "onboarding retoma visualmente na etapa salva");
@@ -140,6 +158,9 @@ async function main() {
   await verify(secondEmail);
   const userB = await db.user.findUniqueOrThrow({ where: { email: secondEmail } });
   const accountB = await login(secondEmail, password);
+  const diagnosticHistoryB = (await json(await request("/api/diagnostics", { cookie: accountB.cookie }))).diagnostics as Array<Record<string, unknown>>;
+  assert.equal(diagnosticHistoryB.length, 0, "histórico da segunda conta não expõe diagnósticos da primeira");
+  assert.equal((await request(`/api/diagnostics/${diagnosticA.id}`, { cookie: accountB.cookie })).status, 404, "detalhe de outro usuário fica oculto");
   const emptyProfile = await request("/api/auth/profile", { cookie: accountB.cookie });
   assert.equal(emptyProfile.status, 200);
   const profileB = (await json(emptyProfile)).profile as Record<string, unknown>;
@@ -153,9 +174,12 @@ async function main() {
   assert.equal(unchanged.profession, "Nutrição", "tentativa da conta B não alterou perfil da conta A");
   assert.equal(changedB.profession, null, "tentativa inválida não altera perfil da conta B");
 
-  const completed = await request("/api/auth/profile", { method: "PATCH", cookie: accountA.cookie, csrf: accountA.csrf, body: { completeOnboarding: true, onboardingStep: 5 } });
+  const completed = await request("/api/auth/profile", { method: "PATCH", cookie: accountA.cookie, csrf: accountA.csrf, body: { completeOnboarding: true, onboardingStep: 5, weeklyTimeMinutes: 60 } });
   const completionText = await completed.text();
   assert.equal(completed.status, 200, `onboarding conclui com os dados mínimos preenchidos (${completionText}; ${JSON.stringify(await db.professionalProfile.findUnique({ where: { userId: userA.id } }))})`);
+  const refreshedDiagnostic = await request("/api/diagnostics", { method: "POST", cookie: accountA.cookie, csrf: accountA.csrf, body: {} });
+  assert.equal(refreshedDiagnostic.status, 201, "novo perfil cria uma revisão do diagnóstico");
+  assert.equal(((await json(refreshedDiagnostic)).diagnostic as Record<string, unknown>).version, 2, "versão anterior é preservada ao alterar perfil");
   const completedHome = await request("/", { cookie: accountA.cookie });
   assert.equal(completedHome.status, 200, "dashboard privado abre após onboarding");
   assert.match(await completedHome.text(), /Profissional de teste/, "dashboard usa dados persistidos do perfil");
@@ -179,7 +203,7 @@ async function main() {
   const accountAfterReset = await login(email, nextPassword);
   const logoutAfterReset = await request("/api/auth/logout", { method: "POST", cookie: accountAfterReset.cookie, csrf: accountAfterReset.csrf });
   assert.equal(logoutAfterReset.status, 201, "nova sessão também pode ser revogada");
-  console.log("Fluxo E2E aprovado: cadastro, e-mail, login, sessão, CSRF, onboarding parcial/perfil, isolamento, logout e recuperação.");
+  console.log("Fluxo E2E aprovado: cadastro, e-mail, login, sessão, CSRF, onboarding parcial/perfil, diagnóstico idempotente e versionado, isolamento, logout e recuperação.");
 }
 
 async function run() {

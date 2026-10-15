@@ -16,7 +16,7 @@ Identity; Professional Profile; Social Integrations; Diagnostics; Market Intelli
 
 ## Dependências
 
-Identity → Profile → Diagnostics/Market Intelligence → Strategy → Challenges/Planning → Analytics/Weekly Reviews. Mentor consome contexto por interfaces explícitas desses módulos. Auditoria recebe eventos sanitizados; não controla domínio. Integrações ficam em adaptadores com contratos próprios, falhas normalizadas e limites observáveis.
+Identity → Profile → Diagnostics → Initial Strategy → (future, separately authorized) Market Intelligence/Planning/Analytics. O motor do diagnóstico da Fase 1B é uma função de domínio determinística, sem dependência do framework web ou APIs externas. Recebe um snapshot tipado do perfil e retorna achados estruturados e estratégia. Uma versão de critérios identifica as regras. Inteligência de mercado, conectores sociais, mentor/IA, desafios e planejamento completo continuam separados e não são implementados nesta autorização.
 
 ## Interface e estados
 
@@ -26,7 +26,9 @@ A web deve privilegiar hierarquia visual, navegação compreensível, teclado, c
 
 `pnpm dev` inicia web (3000) e API (4000). `/api/*` no Next encaminha para o endpoint real da API definido em `API_INTERNAL_URL`. PostgreSQL, Redis e Mailpit iniciam por `pnpm infra:up`.
 
-O navegador usa o proxy same-origin `/api/*`, que encaminha cookies e respostas da API sem expor o segredo da sessão ao JavaScript. NestJS mantém autoridade sobre sessão, validação, autorização e propriedade dos dados; Next consulta `/auth/me` no servidor para proteger páginas privadas. Fluxo: controller → serviço de identidade/perfil → Prisma/PostgreSQL. E-mail transacional usa SMTP configurável; o Mailpit recebe mensagens locais sem encaminhamento externo. Limites de autenticação usam operações atômicas no PostgreSQL; Redis fica disponível para futuras filas.
+O navegador usa o proxy same-origin `/api/*`, que encaminha cookies e respostas da API sem expor o segredo da sessão ao JavaScript. NestJS mantém autoridade sobre sessão, validação, autorização e propriedade dos dados; Next consulta `/auth/me` no servidor para proteger páginas privadas. Fluxo: controller → serviço de domínio → Prisma/PostgreSQL. E-mail transacional usa SMTP configurável; o Mailpit recebe mensagens locais sem encaminhamento externo. Limites de autenticação usam operações atômicas no PostgreSQL; Redis fica disponível para futuras filas.
+
+O módulo `diagnostics` autentica pela sessão, aplica CSRF e origem nas mutações, lê o perfil por `userId` da sessão e persiste snapshot, resultado e estratégia. Um advisory transaction lock por usuário serializa geração concorrente. Solicitações repetidas com perfil e critérios inalterados retornam a versão atual; alteração dos campos relevantes cria nova versão e preserva a anterior. Chave estrangeira composta exige que diagnóstico e estratégia tenham o mesmo proprietário.
 
 A API liga-se ao loopback por padrão (`API_HOST=127.0.0.1`). Produção deve colocá-la em rede privada atrás do Next e configurar `TRUST_PROXY_HOPS` conforme a topologia; a borda confiável deve substituir `X-Forwarded-For` antes do encaminhamento. Isso mantém limites por IP corretos sem confiar em cabeçalhos fornecidos diretamente por clientes.
 

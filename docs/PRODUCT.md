@@ -23,3 +23,7 @@ Monorepo pnpm, aplicação web navegável, API com health check real, estados de
 ## MVP previsto
 
 Identidade e perfil; onboarding; diagnóstico baseado em critérios transparentes; inteligência de mercado com fontes legítimas; estratégias aprováveis; mentor com IA configurada; desafios; registros manuais; retrospectiva semanal idempotente. Integração social depende de autorização oficial. Ver [ROADMAP.md](ROADMAP.md).
+
+## Escopo autorizado da Fase 1B
+
+Esta etapa cobre somente um diagnóstico determinístico sobre informações autodeclaradas no perfil e uma estratégia inicial simples, versionada e compatível com a disponibilidade informada. Não consulta tendências, concorrentes, redes sociais, audiência ou resultados. As demais capacidades previstas no MVP continuam futuras e não devem ser apresentadas como disponíveis.
