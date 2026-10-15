@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import type { ProfessionalProfile } from "@/lib/auth";
 import { Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Check, CircleDashed, Compass, RefreshCw, Sparkles } from "lucide-react";
 
 type HealthState = "loading" | "ready" | "error";
 
-export function Dashboard() {
+export function Dashboard({ profile }: { profile?: ProfessionalProfile | null }) {
   const [health, setHealth] = useState<HealthState>("loading");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -30,15 +32,15 @@ export function Dashboard() {
 
     <section className="setup-banner" aria-labelledby="setup-title">
       <div className="setup-icon"><Compass size={19} /></div>
-      <div className="setup-content"><div className="setup-heading"><div><span className="section-kicker">PONTO DE PARTIDA</span><h2 id="setup-title">Um ponto de partida claro</h2></div></div>
-        <p className="setup-description">A configuração do perfil entra na próxima etapa. Depois, você poderá definir objetivos e preferências no seu tempo.</p>
+      <div className="setup-content"><div className="setup-heading"><div><span className="section-kicker">PONTO DE PARTIDA</span><h2 id="setup-title">{profile?.professionalName ? `Olá, ${profile.professionalName}` : "Seu perfil profissional"}</h2></div></div>
+        <p className="setup-description">{profile?.profession ? `${profile.profession}${profile.specialty ? ` · ${profile.specialty}` : ""}${profile.region ? ` · ${profile.region}` : ""}` : "Seu perfil está salvo e pode ser atualizado quando quiser."}</p>
       </div>
       <ArrowRight size={17} className="banner-arrow" aria-hidden="true" />
     </section>
 
     <div className="section-heading"><div><span className="section-kicker">SEU ESPAÇO</span><h2>Um começo consciente</h2></div><span className="quiet-label">Os dados aparecerão conforme você avança</span></div>
     <section className="overview-grid" aria-label="Resumo do espaço">
-      <article className="overview-card focus-card"><div className="card-top"><span className="card-icon"><Sparkles size={17} /></span><span className="card-label">PRÓXIMO PASSO</span></div><h3>Ainda não há um plano ativo</h3><p>Seu plano será construído a partir do seu perfil, das suas prioridades e do tempo que você tem disponível.</p><div className="card-bottom"><span>Personalizado para você</span><ArrowUpRight size={15} /></div></article>
+      <article className="overview-card focus-card"><div className="card-top"><span className="card-icon"><Sparkles size={17} /></span><span className="card-label">PRÓXIMO PASSO</span></div><h3>{profile?.professionalGoals?.length ? profile.professionalGoals[0] : "Ainda não há um plano ativo"}</h3><p>{profile?.weeklyTimeMinutes ? `${Math.round(profile.weeklyTimeMinutes / 60)} horas semanais reservadas para sua presença digital.` : "Seu plano será construído a partir do seu perfil, das suas prioridades e do tempo que você tem disponível."}</p><div className="card-bottom"><Link href="/perfil">Revisar perfil</Link><ArrowUpRight size={15} /></div></article>
       <article className="overview-card"><div className="card-top"><span className="card-icon card-icon-soft"><Activity size={16} /></span><span className="card-label">MOVIMENTO DA SEMANA</span></div><div className="empty-number">—</div><p className="metric-note">Sem registros neste período</p><div className="card-bottom subdued"><span>As atividades ficam sob seu controle</span><ArrowDownRight size={15} /></div></article>
       <article className="overview-card"><div className="card-top"><span className="card-icon card-icon-soft"><CircleDashed size={16} /></span><span className="card-label">SUA JORNADA</span></div><div className="empty-number">—</div><p className="metric-note">Nenhuma jornada iniciada</p><div className="card-bottom subdued"><span>Sem pressão, no seu tempo</span><Check size={15} /></div></article>
     </section>

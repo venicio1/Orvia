@@ -1,13 +1,14 @@
 # Modelo inicial de dados
 
-Fase 0 configura Compose para PostgreSQL/Redis e Prisma 7. O schema inicial `apps/api/prisma/schema.prisma` contém somente `User` e `ProfessionalProfile`, sem credenciais nem dados clínicos. Ainda não há migração aplicada nem endpoints que leiam ou gravem dados; o modelo completo abaixo é a base a expandir e validar na Fase 1.
+PostgreSQL e Prisma 7. A migração versionada em `apps/api/prisma/migrations/20261015174248_identity_profile` implementa persistência de identidade e perfil. Nenhum dado clínico de paciente é coletado.
 
 ## Entidades
 
-- `User`: e-mail normalizado único, hash de credencial, estado e datas.
-- `Session`: hash do identificador, validade, revogação e usuário.
-- `ProfessionalProfile`: usuário, profissão, especialidade, região, modalidade, público e objetivos.
-- `ProfilePreference`: disponibilidade, formatos, frequência, fuso e preferências.
+- `User`: e-mail normalizado único, hash de credencial, confirmação e datas.
+- `Session`: hash do identificador e CSRF, validade, revogação e usuário. Cookie opaco não persiste em claro.
+- `AuthToken`: hash de token de uso único para confirmação de e-mail ou redefinição de senha, finalidade e validade.
+- `RateLimitBucket`: contador e janela de limite por chave derivada de IP/e-mail.
+- `ProfessionalProfile`: usuário, nome profissional, profissão, especialidade, região, modalidade, público, objetivos, disponibilidade, experiência e frequência social, preferências de comunicação e progresso do onboarding.
 - `SocialAccount` / `SyncRun`: provedor, identificador externo, escopos, token cifrado, validade e execução de sincronização.
 - `SocialPost` / `MetricSnapshot`: publicação e valores versionados com origem, período, observação e data da coleta.
 - `Diagnostic` / `DiagnosticFinding`: metodologia, dimensões, evidências, resultado e recomendações.
@@ -31,4 +32,4 @@ Definir prazos antes de habilitar conversas, snapshots ou logs. Tokens sociais c
 
 ## Questões a fechar
 
-Semântica de exclusão/anomização; retenção de conversas; granularidade e janela de métricas; estratégia de fuso/semana; catálogo de profissões e fontes. A primeira migração será criada/versionada com Prisma quando os campos da Fase 1 forem aprovados.
+Semântica de exclusão/anomização; retenção de conversas; granularidade e janela de métricas; estratégia de fuso/semana; catálogo de profissões e fontes. Perfil é um-para-um por `user_id`; leitura e escrita usam exclusivamente o `user_id` da sessão. Disponibilidade semanal tem limite de 0 a 2400 minutos; constraints e cardinalidades estão na migration SQL `20261015180000_identity_constraints`. Use `pnpm db:migrate` em desenvolvimento e `pnpm db:deploy` para aplicar migrações já versionadas. Nunca remova volumes.

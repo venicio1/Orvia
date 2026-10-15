@@ -33,7 +33,7 @@
 ## Pendentes
 
 - Provedor de hospedagem/região e política de backup.
-- Biblioteca/provedor de autenticação, SMTP/e-mail e regras de recuperação.
+- Provedor SMTP de produção, domínio/remetente e política de recuperação de produção.
 - Provedor/modelo de IA, retenção e orçamento por usuário.
 - Fontes iniciais de tendência e responsável por aprovar catálogo/termos.
 - Aplicativo Meta, permissões necessárias e processo de revisão.
@@ -42,3 +42,29 @@
 - Identidade visual final (marca, tipografia e tokens aprovados).
 
 Decisões pendentes não bloqueiam a fundação, mas bloqueiam a ativação dos respectivos módulos.
+
+## Fase 1A
+
+### D-008 — Sessão própria na API NestJS
+
+**Decisão:** sessão opaca de 256 bits, somente hash SHA-256 em PostgreSQL, validade de sete dias e cookie HttpOnly/SameSite=Lax; Next encaminha pelo proxy same-origin. **Motivo:** manter autorização na API planejada sem expor token bearer ao JavaScript. CSRF combina origem estrita e double-submit vinculado à sessão.
+
+### D-009 — Derivação de senha com scrypt do Node
+
+**Decisão:** `node:crypto` scrypt com N=2^17, r=8, p=1, salt aleatório de 128 bits e comparação de tempo constante. **Motivo:** KDF resistente a força bruta sem dependência nativa ou script de instalação, compatível com Windows.
+
+### D-010 — Mailpit local e SMTP em produção
+
+**Decisão:** Nodemailer envia confirmação/reset ao Mailpit local; produção requer SMTP TLS autenticado e remetente verificado. **Motivo:** testar os fluxos sem transmitir e-mail nem credenciais para serviço externo. Nenhum provedor de produção foi escolhido.
+
+### D-011 — Limitação atômica no PostgreSQL
+
+**Decisão:** contadores SQL atômicos por hash de IP/e-mail. **Motivo:** persistir limites entre reinícios e permitir múltiplas instâncias sem exigir Redis nesta fase.
+
+### D-012 — API local e proxy confiável
+
+**Decisão:** API liga-se ao loopback local; em produção, só fica acessível pela rede privada e `TRUST_PROXY_HOPS` é configurado para os proxies reais. **Motivo:** usar IP encaminhado para limites sem confiar em cabeçalhos arbitrários de clientes.
+
+### D-013 — Cadastro normalizado e tokens de confirmação serializados
+
+**Decisão:** normalizar e-mail para lowercase, preservar unicidade no PostgreSQL e responder ao cadastro com texto uniforme. Cada conta mantém no máximo um token por finalidade; reenvio substitui o anterior sob advisory lock transacional, e a confirmação consome o token atomicamente com a alteração do estado verificado. A política de senha vale para criação/reset, não para autenticação. **Motivo:** impedir duplicação concorrente, reduzir enumeração e tornar reenvios/consumo previsíveis sem aceitar confirmação duplicada.

@@ -1,32 +1,33 @@
 # Orvia
 
-Fundação de uma plataforma SaaS de inteligência de mercado e crescimento orgânico para profissionais da saúde. A Fase 0 oferece a estrutura visual inicial, navegação, estados de interface reais e uma API de saúde; não inclui ainda onboarding, dados de mercado, IA ou integrações sociais.
+Plataforma SaaS de crescimento profissional para profissionais da saúde. A Fase 1A inclui identidade, autenticação, perfil profissional e onboarding progressivo. Diagnóstico, dados de mercado, IA e integrações sociais seguem fora do escopo.
 
 ## Requisitos
 
 - Node.js `>=22.22.3` e pnpm `11.25.0` (ou compatível com `packageManager`).
-- Docker Desktop com Compose, caso queira iniciar PostgreSQL e Redis locais. Eles não são necessários para abrir a interface da Fase 0.
+- Docker Desktop com Compose para PostgreSQL, Redis e Mailpit locais.
 
 ## Executar localmente
 
 ```powershell
+pnpm infra:up
+Copy-Item apps/api/.env.example apps/api/.env
+Copy-Item apps/web/.env.example apps/web/.env.local
+pnpm db:generate
+pnpm db:migrate
 pnpm install
 pnpm dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). O frontend encaminha o health check para `API_INTERNAL_URL` (padrão `http://localhost:4000`). Se a API não estiver disponível, a interface mostra erro real e opção de tentar novamente.
+Abra [http://localhost:3000](http://localhost:3000). Crie uma conta, confirme o endereço em [Mailpit](http://localhost:8025), entre e complete o onboarding. Mensagens locais não saem da máquina. O Mailpit usa SMTP em `127.0.0.1:1025`.
 
-Para iniciar os serviços de dados locais (opcional nesta fase):
+Para atualizar o banco com migrações futuras:
 
 ```powershell
-Copy-Item apps/api/.env.example apps/api/.env
-pnpm infra:up
-pnpm db:generate
 pnpm db:migrate
 ```
 
-PostgreSQL e Redis ficam vinculados somente ao loopback. As credenciais do Compose são exclusivas para desenvolvimento local. O app ainda não lê nem grava dados nesses serviços na Fase 0.
-Para personalizar o destino da API no frontend, copie `apps/web/.env.example` para `apps/web/.env.local`.
+PostgreSQL, Redis e Mailpit ficam vinculados somente ao loopback. `.env` e `.env.local` contêm valores locais ignorados pelo Git. Em produção, configure SMTP autenticado com TLS e remetente verificado; consulte [docs/SECURITY.md](docs/SECURITY.md).
 
 Para executar isoladamente: `pnpm dev:web` ou `pnpm dev:api`. A API fica em `http://localhost:4000/health`.
 
@@ -55,4 +56,4 @@ pnpm build
 
 ## Estado da fundação
 
-Nenhum dado de usuário, métrica social ou tendência é inventado. A interface apresenta áreas vazias até que módulos com fontes verificadas sejam implementados. A conexão com Meta, IA, e-mail e pagamentos não está ativa nesta fase.
+Dados de mercado, métricas e funcionalidades posteriores não são simulados. O e-mail ativo nesta fase é apenas o serviço local Mailpit para confirmação e recuperação de acesso.

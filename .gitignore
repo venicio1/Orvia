@@ -1,6 +1,12 @@
 node_modules/
 .next/
+.next*/
 dist/
+build/
+out/
+.output/
+.vercel/
+.cache/
 apps/api/generated/
 coverage/
 .turbo/
@@ -8,6 +14,8 @@ coverage/
 .env.*
 !.env.example
 *.log
+*.tmp
+*.temp
 *.tsbuildinfo
 apps/web/next-env.d.ts
 .DS_Store

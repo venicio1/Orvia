@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { EmptySection } from "@/components/empty-section";
+import { currentProfile, currentUser } from "@/lib/auth";
+import { redirect } from "next/navigation";
 
 const sections: Record<string, { label: string; description: string }> = {
   mercado: { label: "Inteligência de mercado", description: "Tendências e referências aparecerão aqui quando houver fontes verificadas e dados disponíveis." },
@@ -16,5 +18,9 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   const { section } = await params;
   const config = sections[section];
   if (!config) notFound();
-  return <AppShell active={section}><EmptySection {...config} /></AppShell>;
+  const user = await currentUser();
+  if (!user) redirect("/entrar");
+  if (!user.onboardingCompleted) redirect("/onboarding");
+  const profile = await currentProfile();
+  return <AppShell active={section} email={user.email} professionalName={profile?.professionalName}><EmptySection {...config} /></AppShell>;
 }
