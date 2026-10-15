@@ -1,0 +1,22 @@
+{
+  "name": "orvia",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": ">=22.22.3" },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @orvia/web --filter @orvia/api dev",
+    "dev:web": "pnpm --filter @orvia/web dev",
+    "dev:api": "pnpm --filter @orvia/api dev",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d --wait",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "db:generate": "pnpm --filter @orvia/api db:generate",
+    "db:validate": "pnpm --filter @orvia/api db:validate",
+    "db:migrate": "pnpm --filter @orvia/api db:migrate",
+    "build": "pnpm --recursive build",
+    "typecheck": "pnpm --recursive typecheck",
+    "lint": "pnpm --recursive lint",
+    "test": "pnpm --recursive test",
+    "check": "pnpm db:validate && pnpm typecheck && pnpm lint && pnpm test && pnpm build"
+  }
+}

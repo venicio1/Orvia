@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String              @id @default(uuid()) @db.Uuid
+  email     String              @unique @db.VarChar(320)
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  profile   ProfessionalProfile?
+
+  @@map("users")
+}
+
+model ProfessionalProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @unique @map("user_id") @db.Uuid
+  professionalName  String?  @map("professional_name") @db.VarChar(160)
+  profession        String?  @db.VarChar(120)
+  specialty         String?  @db.VarChar(160)
+  city              String?  @db.VarChar(120)
+  region            String?  @db.VarChar(120)
+  serviceMode       String?  @map("service_mode") @db.VarChar(40)
+  targetAudience    String?  @map("target_audience") @db.Text
+  weeklyTimeMinutes Int?     @map("weekly_time_minutes")
+  timeZone          String   @default("America/Sao_Paulo") @map("time_zone") @db.VarChar(64)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([region, specialty])
+  @@map("professional_profiles")
+}
