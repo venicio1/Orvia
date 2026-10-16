@@ -24,6 +24,9 @@ function fakeDatabase() {
   const runCreate = vi.fn(async () => ({ id: "sync-run-id" }));
   const runUpdate = vi.fn(async () => ({ id: "sync-run-id" }));
   const snapshotDeleteMany = vi.fn(async () => ({ count: 0 }));
+  const mediaAssetDeleteMany = vi.fn(async () => ({ count: 0 }));
+  const mediaPostDeleteMany = vi.fn(async () => ({ count: 0 }));
+  const mediaStateDeleteMany = vi.fn(async () => ({ count: 0 }));
   const db = {
     metaOAuthAttempt: {
       deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -57,13 +60,13 @@ function fakeDatabase() {
     },
     instagramProfileSnapshot: { deleteMany: snapshotDeleteMany },
     socialSyncRun: { create: runCreate, update: runUpdate },
-    $transaction: vi.fn(async (callback: (transaction: unknown) => unknown) => callback({ socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany } })),
+    $transaction: vi.fn(async (callback: (transaction: unknown) => unknown) => callback({ socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany }, instagramMediaAsset: { deleteMany: mediaAssetDeleteMany }, instagramMediaPost: { deleteMany: mediaPostDeleteMany }, instagramMediaSyncState: { deleteMany: mediaStateDeleteMany } })),
   } as unknown as PrismaService;
   const transaction = async (callback: (transaction: unknown) => unknown) => callback({
-    socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany }, metaOAuthAttempt: { update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { attempt = { ...attempt!, ...data }; return attempt; }) },
+    socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany }, instagramMediaAsset: { deleteMany: mediaAssetDeleteMany }, instagramMediaPost: { deleteMany: mediaPostDeleteMany }, instagramMediaSyncState: { deleteMany: mediaStateDeleteMany }, metaOAuthAttempt: { update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { attempt = { ...attempt!, ...data }; return attempt; }) },
   });
   (db as unknown as { $transaction: typeof transaction }).$transaction = vi.fn(transaction);
-  return { db, upsert, runCreate };
+  return { db, upsert, runCreate, mediaAssetDeleteMany, mediaPostDeleteMany, mediaStateDeleteMany };
 }
 
 function metaResponses() {
@@ -288,7 +291,7 @@ describe("Meta social connection foundation", () => {
   });
 
   it("clears encrypted credentials when disconnecting and scopes every mutation by user", async () => {
-    const { db } = fakeDatabase();
+    const { db, mediaAssetDeleteMany, mediaPostDeleteMany, mediaStateDeleteMany } = fakeDatabase();
     const result = await new SocialIntegrationsService(db).disconnect(userId, "social-account-id");
     expect(result.message).toContain("credencial armazenada foi apagada");
     expect(db.socialAccount.updateMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -296,5 +299,8 @@ describe("Meta social connection foundation", () => {
       data: expect.objectContaining({ accessTokenCiphertext: null, grantedScopes: [], status: "disconnected" }),
     }));
     expect(db.socialSyncRun.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ operation: "disconnect", status: "succeeded" }) }));
+    expect(mediaAssetDeleteMany).toHaveBeenCalledWith({ where: { socialAccountId: "social-account-id", userId } });
+    expect(mediaPostDeleteMany).toHaveBeenCalledWith({ where: { socialAccountId: "social-account-id", userId } });
+    expect(mediaStateDeleteMany).toHaveBeenCalledWith({ where: { socialAccountId: "social-account-id", userId } });
   });
 });

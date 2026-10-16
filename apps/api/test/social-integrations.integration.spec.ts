@@ -60,6 +60,35 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
     expect((await social.syncProfile(second.id, account.id)).outcome).toBe("throttled");
     expect(await db.instagramProfileSnapshot.findFirst({ where: { socialAccountId: account.id, userId: second.id } })).toBeNull();
 
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [
+      { id: "test-image", media_type: "IMAGE", caption: "fixture only", media_url: "https://scontent.cdninstagram.com/fixture.jpg" },
+      { id: "test-carousel", media_type: "CAROUSEL_ALBUM", children: { data: [{ id: "test-child", media_type: "IMAGE" }] } },
+    ] }), { status: 200, headers: { "content-type": "application/json" } })));
+    const mediaSync = await social.syncMediaPage(first.id, account.id, "refresh");
+    expect(mediaSync).toMatchObject({ outcome: "succeeded", storedCount: 2, sync: { status: "succeeded", pagesRead: 1 } });
+    const storedMedia = await db.instagramMediaPost.findMany({ where: { userId: first.id, socialAccountId: account.id }, include: { assets: true } });
+    expect(storedMedia).toHaveLength(2);
+    expect(storedMedia.find(item => item.providerMediaId === "test-carousel")?.assets).toHaveLength(1);
+    expect(await db.instagramMediaSyncState.findUniqueOrThrow({ where: { socialAccountId: account.id } })).toMatchObject({ userId: first.id, status: "succeeded", storedCount: 2, source: "instagram_graph_api" });
+    await expect(db.instagramMediaPost.create({ data: {
+      userId: second.id, socialAccountId: account.id, providerMediaId: "cross-user-post", mediaType: "IMAGE",
+      source: "instagram_graph_api", apiVersion: "v99.0", fetchedAt: new Date(),
+    } })).rejects.toMatchObject({ code: "P2003" });
+    expect(await social.listMedia(second.id, account.id).catch(() => null)).toBeNull();
+
+    await db.socialAccount.update({ where: { id: account.id }, data: { mediaSyncLastAttemptAt: null, mediaSyncLeaseUntil: null } });
+    const concurrentFetch = vi.fn(async () => {
+      await new Promise(resolve => setTimeout(resolve, 80));
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", concurrentFetch);
+    const concurrent = await Promise.all([
+      social.syncMediaPage(first.id, account.id, "refresh"),
+      social.syncMediaPage(first.id, account.id, "refresh"),
+    ]);
+    expect(concurrent.map(result => result.outcome).sort()).toEqual(["succeeded", "throttled"]);
+    expect(concurrentFetch).toHaveBeenCalledTimes(1);
+
     await expect(social.disconnect(second.id, account.id)).rejects.toMatchObject({ response: { code: "social_account_not_found" } });
 
     const fallbackResponses = [
@@ -86,5 +115,7 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
     const disconnected = await db.socialAccount.findUniqueOrThrow({ where: { id: account.id } });
     expect(disconnected).toMatchObject({ status: "disconnected", accessTokenCiphertext: null, grantedScopes: [] });
     expect(await db.instagramProfileSnapshot.findUnique({ where: { socialAccountId: account.id } })).toBeNull();
+    expect(await db.instagramMediaPost.findMany({ where: { socialAccountId: account.id } })).toHaveLength(0);
+    expect(await db.instagramMediaSyncState.findUnique({ where: { socialAccountId: account.id } })).toBeNull();
   });
 });

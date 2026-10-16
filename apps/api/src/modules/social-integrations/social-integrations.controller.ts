@@ -75,6 +75,42 @@ export class SocialIntegrationsController {
     return this.integrations.syncProfile(session.userId, accountId);
   }
 
+  @Get("accounts/:id/media")
+  async listMedia(
+    @Req() req: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) accountId: string,
+    @Query("after") after?: string,
+  ) {
+    const session = await this.session(req);
+    return this.integrations.listMedia(session.userId, accountId, after);
+  }
+
+  @Post("accounts/:id/media/sync")
+  async syncMedia(
+    @Req() req: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) accountId: string,
+    @Headers("x-csrf-token") csrf: string | undefined,
+    @Headers("origin") origin: string | undefined,
+  ) {
+    this.originCheck(origin);
+    const session = await this.session(req);
+    this.csrf(req, csrf);
+    return this.integrations.syncMediaPage(session.userId, accountId, "refresh");
+  }
+
+  @Post("accounts/:id/media/load-more")
+  async loadMoreMedia(
+    @Req() req: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) accountId: string,
+    @Headers("x-csrf-token") csrf: string | undefined,
+    @Headers("origin") origin: string | undefined,
+  ) {
+    this.originCheck(origin);
+    const session = await this.session(req);
+    this.csrf(req, csrf);
+    return this.integrations.syncMediaPage(session.userId, accountId, "load_more");
+  }
+
   @Get("callback")
   async callback(
     @Req() req: SessionRequest,

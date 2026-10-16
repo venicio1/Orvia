@@ -1,4 +1,4 @@
-import { ConflictException, Inject, Injectable, ServiceUnavailableException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ConflictException, Inject, Injectable, ServiceUnavailableException, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../../database/prisma.service";
 import { decryptMetaToken, encryptMetaToken } from "./token-crypto";
@@ -11,12 +11,29 @@ const PAGE_DISCOVERY_TTL_MS = 10 * 60 * 1000;
 const PAGE_DISCOVERY_MAX_ATTEMPTS = 5;
 const PROFILE_SYNC_COOLDOWN_MS = 30_000;
 const PROFILE_SYNC_LEASE_MS = 30_000;
+const MEDIA_REFRESH_COOLDOWN_MS = 30_000;
+const MEDIA_PAGE_COOLDOWN_MS = 1_500;
+const MEDIA_SYNC_LEASE_MS = 45_000;
+const MEDIA_PAGE_LIMIT = 25;
+const MEDIA_FIELDS = ["id", "caption", "timestamp", "permalink", "media_type", "media_url", "thumbnail_url", "media_product_type"] as const;
+const MEDIA_OPTIONAL_FIELDS = ["caption", "timestamp", "permalink", "media_url", "thumbnail_url", "media_product_type"] as const;
+const CHILD_FIELDS = ["id", "media_type", "media_url", "thumbnail_url"] as const;
+const MEDIA_TYPES = new Set(["IMAGE", "VIDEO", "CAROUSEL_ALBUM"]);
 const INSTAGRAM_PROFILE_FIELDS = ["username", "name", "biography", "profile_picture_url", "followers_count", "follows_count", "media_count", "website"] as const;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 type MetaPage = { id?: string; name?: string; access_token?: string; instagram_business_account?: { id?: string; username?: string } | null };
 type GraphError = { error?: { type?: string; code?: number; message?: string } };
 type MetaPagesResponse = { data: MetaPage[]; paging?: { next?: string; cursors?: { after?: string } } };
+type InstagramMediaEdgeResponse = {
+  data?: InstagramMediaObject[];
+  paging?: { next?: string; cursors?: { after?: string } };
+};
+type InstagramMediaObject = {
+  id?: unknown; caption?: unknown; timestamp?: unknown; permalink?: unknown; media_type?: unknown;
+  media_product_type?: unknown; media_url?: unknown; thumbnail_url?: unknown;
+  children?: { data?: InstagramMediaObject[] } | null;
+};
 type InstagramProfileResponse = {
   id?: string;
   username?: unknown;
@@ -28,6 +45,16 @@ type InstagramProfileResponse = {
   media_count?: unknown;
   website?: unknown;
 };
+
+function safeMetaMediaUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    const trustedHost = ["cdninstagram.com", "fbcdn.net", "fbsbx.com"].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+    if (url.protocol !== "https:" || !trustedHost || url.username || url.password || [...url.searchParams.keys()].some(key => /(access_?token|token|secret|authorization|oauth|(^|[_-])code($|[_-])|(^|[_-])state($|[_-])|api_?key)/i.test(key))) return null;
+    return url.toString();
+  } catch { return null; }
+}
 
 @Injectable()
 export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy {
@@ -133,11 +160,51 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     const data = await response.json().catch(() => null) as (T & GraphError) | null;
     if (!response.ok || !data || data.error) {
       const graphCode = data?.error?.code;
+      const providerMessage = data?.error?.message ?? "";
+      if (graphCode === 100 && /cursor|pagination|after/i.test(providerMessage)) throw new MetaApiError("cursor_invalid", graphCode);
+      if (graphCode === 100) {
+        const match = providerMessage.match(/(?:nonexisting|non-existent|invalid|unknown) field\s*\(?([a-z_]+)\)?/i)
+          ?? providerMessage.match(/field\s*\(?([a-z_]+)\)?[^.]*does not exist/i);
+        const field = match?.[1]?.toLowerCase();
+        if (field && [...MEDIA_OPTIONAL_FIELDS, ...CHILD_FIELDS].some(candidate => candidate.toLowerCase() === field)) {
+          throw new MetaApiError("unsupported_field", graphCode, field);
+        }
+      }
       if (graphCode === 10 || graphCode === 200) throw new MetaIntegrationError("insufficient_permissions");
       if (response.status === 429 || [4, 17, 32, 613].includes(graphCode ?? -1)) throw new MetaApiError("rate_limited", graphCode);
       throw new MetaApiError(graphCode === 190 ? "token_invalid" : `graph_http_${response.status}`, graphCode);
     }
     return data as T;
+  }
+
+  private async graphMediaPage<T extends InstagramMediaEdgeResponse>(url: URL, token: string) {
+    const fields = [...MEDIA_FIELDS] as string[];
+    const childFields = [...CHILD_FIELDS] as string[];
+    const unavailableFields: string[] = [];
+    let includeChildren = true;
+    for (let attempt = 0; attempt <= MEDIA_OPTIONAL_FIELDS.length + CHILD_FIELDS.length; attempt += 1) {
+      const requested = includeChildren ? [...fields, `children{${childFields.join(",")}}`] : fields;
+      url.searchParams.set("fields", requested.join(","));
+      try { return { response: await this.graphJson<T>(url, token), unavailableFields, requestedFields: requested }; }
+      catch (error) {
+        if (!(error instanceof MetaApiError) || error.code !== "unsupported_field" || !error.unsupportedField) throw error;
+        const field = error.unsupportedField;
+        const parentIndex = fields.indexOf(field);
+        const childIndex = childFields.indexOf(field);
+        if (field === "children") {
+          if (!includeChildren) throw new MetaIntegrationError("required_media_field_unavailable");
+          unavailableFields.push(field);
+          includeChildren = false;
+          continue;
+        }
+        if (parentIndex < 0 && childIndex < 0) throw new MetaIntegrationError("required_media_field_unavailable");
+        if (field === "id" || field === "media_type") throw new MetaIntegrationError("required_media_field_unavailable");
+        unavailableFields.push(field);
+        if (parentIndex >= 0) fields.splice(parentIndex, 1);
+        if (childIndex >= 0) childFields.splice(childIndex, 1);
+      }
+    }
+    throw new MetaIntegrationError("media_fields_unavailable");
   }
 
   private async exchangeCode(code: string) {
@@ -380,6 +447,9 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
       });
       if (result.count !== 1) throw new ConflictException({ code: "social_account_not_found", message: "Esta conta conectada não foi encontrada." });
       await transaction.instagramProfileSnapshot.deleteMany({ where: { socialAccountId: accountId, userId } });
+      await transaction.instagramMediaAsset.deleteMany({ where: { socialAccountId: accountId, userId } });
+      await transaction.instagramMediaPost.deleteMany({ where: { socialAccountId: accountId, userId } });
+      await transaction.instagramMediaSyncState.deleteMany({ where: { socialAccountId: accountId, userId } });
       await transaction.socialSyncRun.create({ data: { userId, socialAccountId: accountId, provider: META_PROVIDER, operation: "disconnect", status: "succeeded", finishedAt: new Date() } });
     });
     return { message: "A conexão foi removida e a credencial armazenada foi apagada." };
@@ -442,6 +512,218 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     }
   }
 
+  async listMedia(userId: string, accountId: string, after?: string) {
+    if (after && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(after)) {
+      throw new BadRequestException({ code: "media_cursor_invalid", message: "A lista mudou. Atualize as publicações para continuar." });
+    }
+    const account = await this.db.socialAccount.findFirst({
+      where: { id: accountId, userId, provider: META_PROVIDER, status: "connected" },
+      select: {
+        id: true, mediaReauthorizationRequired: true,
+        profileSnapshot: { select: { mediaCount: true } },
+        mediaSyncState: { select: {
+          status: true, hasMore: true, requestedFields: true, unavailableFields: true, storedCount: true,
+          recordsRead: true, pagesRead: true, warningCode: true, lastErrorCode: true, lastAttemptAt: true,
+          lastSuccessAt: true, completedAt: true, source: true, apiVersion: true,
+        } },
+      },
+    });
+    if (!account) throw new ConflictException({ code: "social_account_not_found", message: "Esta conta conectada não foi encontrada." });
+    const cursor = after ? { id: after } : undefined;
+    let posts;
+    try {
+      posts = await this.db.instagramMediaPost.findMany({
+        where: { userId, socialAccountId: accountId },
+        orderBy: [{ publishedAt: { sort: "desc", nulls: "last" } }, { id: "asc" }],
+        ...(cursor ? { cursor, skip: 1 } : {}), take: 13,
+        include: { assets: { orderBy: { position: "asc" }, select: {
+          id: true, providerMediaId: true, position: true, mediaType: true, mediaUrl: true, thumbnailUrl: true, returnedFields: true,
+        } } },
+      });
+    } catch (error) {
+      if (after) throw new BadRequestException({ code: "media_cursor_invalid", message: "A lista mudou. Atualize as publicações para continuar." });
+      throw error;
+    }
+    const hasMoreStored = posts.length > 12;
+    const page = posts.slice(0, 12);
+    const storedCount = await this.db.instagramMediaPost.count({ where: { userId, socialAccountId: accountId } });
+    return {
+      accountId,
+      posts: page,
+      nextCursor: hasMoreStored ? page.at(-1)?.id ?? null : null,
+      hasMoreStored,
+      profileMediaCount: account.profileSnapshot?.mediaCount ?? null,
+      storedCount,
+      loadedCount: page.length,
+      mediaReauthorizationRequired: account.mediaReauthorizationRequired,
+      sync: account.mediaSyncState ? { ...account.mediaSyncState, storedCount } : {
+        status: "never_synced", hasMore: false, requestedFields: [], unavailableFields: [], storedCount,
+        recordsRead: 0, pagesRead: 0, warningCode: null, lastErrorCode: null, lastAttemptAt: null,
+        lastSuccessAt: null, completedAt: null, source: "instagram_graph_api", apiVersion: process.env.META_GRAPH_API_VERSION ?? "v26.0",
+      },
+    };
+  }
+
+  async syncMediaPage(userId: string, accountId: string, mode: "refresh" | "load_more") {
+    const config = this.configuration();
+    if (!config.encryptionKey || !config.graphVersion) return { outcome: "meta_not_configured" as const };
+    const owner = await this.db.socialAccount.findFirst({
+      where: { id: accountId, userId, provider: META_PROVIDER, status: "connected" },
+      select: { id: true, providerAccountId: true, accessTokenCiphertext: true, mediaReauthorizationRequired: true },
+    });
+    if (!owner) throw new ConflictException({ code: "social_account_not_found", message: "Esta conta conectada não foi encontrada." });
+    if (owner.mediaReauthorizationRequired) return { outcome: "reauthorization_required" as const, ...(await this.listMedia(userId, accountId)) };
+
+    const now = new Date();
+    const cooldown = mode === "refresh" ? MEDIA_REFRESH_COOLDOWN_MS : MEDIA_PAGE_COOLDOWN_MS;
+    const allowedSince = new Date(now.getTime() - cooldown);
+    const claim = await this.db.socialAccount.updateMany({
+      where: {
+        id: accountId, userId, provider: META_PROVIDER, status: "connected",
+        OR: [{ mediaSyncLeaseUntil: null }, { mediaSyncLeaseUntil: { lt: now } }],
+        AND: [{ OR: [{ mediaSyncLastAttemptAt: null }, { mediaSyncLastAttemptAt: { lt: allowedSince } }] }],
+      },
+      data: { mediaSyncLeaseUntil: new Date(now.getTime() + MEDIA_SYNC_LEASE_MS), mediaSyncLastAttemptAt: now },
+    });
+    if (claim.count !== 1) return { outcome: "throttled" as const, ...(await this.listMedia(userId, accountId)) };
+
+    await this.db.instagramMediaSyncState.upsert({
+      where: { socialAccountId: accountId },
+      create: { userId, socialAccountId: accountId, status: "never_synced", apiVersion: config.graphVersion },
+      update: {},
+    });
+    const previous = await this.db.instagramMediaSyncState.findFirst({ where: { socialAccountId: accountId, userId } });
+    if (!previous) {
+      await this.db.socialAccount.updateMany({ where: { id: accountId, userId }, data: { mediaSyncLeaseUntil: null } });
+      throw new ConflictException({ code: "social_account_not_found", message: "Esta conta conectada não foi encontrada." });
+    }
+    if (mode === "load_more" && (!previous.hasMore || !previous.nextCursor)) {
+      await this.db.socialAccount.updateMany({ where: { id: accountId, userId }, data: { mediaSyncLeaseUntil: null } });
+      return { outcome: "no_more_pages" as const, ...(await this.listMedia(userId, accountId)) };
+    }
+
+    const run = await this.db.socialSyncRun.create({ data: {
+      userId, socialAccountId: accountId, provider: META_PROVIDER, operation: "instagram_media", status: "running", startedAt: now,
+    }, select: { id: true } });
+    const cursor = mode === "refresh" ? null : previous.nextCursor;
+    const nextPageCount = mode === "refresh" ? 1 : previous.pagesRead + 1;
+    const nextRecordsRead = mode === "refresh" ? 0 : previous.recordsRead;
+
+    try {
+      if (!owner.accessTokenCiphertext || !/^\d{1,32}$/.test(owner.providerAccountId)) throw new MetaIntegrationError("connected_account_unavailable");
+      const token = decryptMetaToken(owner.accessTokenCiphertext, config.encryptionKey);
+      const url = new URL(`https://graph.facebook.com/${config.graphVersion}/${owner.providerAccountId}/media`);
+      url.searchParams.set("limit", String(MEDIA_PAGE_LIMIT));
+      if (cursor) url.searchParams.set("after", cursor);
+      const { response, unavailableFields, requestedFields } = await this.graphMediaPage<InstagramMediaEdgeResponse>(url, token);
+      if (!Array.isArray(response.data)) throw new MetaIntegrationError("invalid_media_page");
+      const edgeHasMore = Boolean(response.paging?.next);
+      const nextCursor = response.paging?.cursors?.after ?? null;
+      if (edgeHasMore && !nextCursor) throw new MetaIntegrationError("pagination_cursor_missing");
+      const fetchedAt = new Date();
+      let invalidRecords = 0;
+      const parsed = response.data.flatMap(media => {
+        const item = this.parseInstagramMedia(media, fetchedAt);
+        if (!item) { invalidRecords += 1; return []; }
+        const children = Array.isArray(media.children?.data)
+          ? media.children.data.flatMap((child, childIndex) => {
+            const asset = this.parseInstagramMediaAsset(child, childIndex, fetchedAt);
+            if (!asset) invalidRecords += 1;
+            return asset ? [asset] : [];
+          })
+          : null;
+        return [{ ...item, children }];
+      });
+      const accumulatedUnavailable = [...new Set([...(mode === "load_more" ? previous.unavailableFields : []), ...unavailableFields])];
+      await this.db.$transaction(async transaction => {
+        for (const item of parsed) {
+          const { children, ...post } = item;
+          const saved = await transaction.instagramMediaPost.upsert({
+            where: { socialAccountId_providerMediaId: { socialAccountId: accountId, providerMediaId: post.providerMediaId } },
+            create: { userId, socialAccountId: accountId, ...post },
+            update: { ...post, userId, socialAccountId: accountId },
+            select: { id: true },
+          });
+          if (children !== null) {
+            await transaction.instagramMediaAsset.deleteMany({ where: { userId, socialAccountId: accountId, parentPostId: saved.id } });
+            if (children.length) await transaction.instagramMediaAsset.createMany({
+              data: children.map(child => ({ userId, socialAccountId: accountId, parentPostId: saved.id, ...child })), skipDuplicates: true,
+            });
+          }
+        }
+        const storedCount = await transaction.instagramMediaPost.count({ where: { userId, socialAccountId: accountId } });
+        await transaction.instagramMediaSyncState.update({
+          where: { socialAccountId: accountId },
+          data: {
+            status: invalidRecords ? "partial_with_warnings" : edgeHasMore ? "partial" : "succeeded",
+            nextCursor: edgeHasMore ? nextCursor : null, hasMore: edgeHasMore,
+            requestedFields, unavailableFields: accumulatedUnavailable,
+            storedCount, recordsRead: nextRecordsRead + response.data!.length, pagesRead: nextPageCount,
+            warningCode: invalidRecords ? "invalid_media_records" : null, lastErrorCode: null,
+            lastAttemptAt: fetchedAt, lastSuccessAt: fetchedAt, completedAt: edgeHasMore ? null : fetchedAt,
+            source: "instagram_graph_api", apiVersion: config.graphVersion!,
+          },
+        });
+        await transaction.socialAccount.updateMany({ where: { id: accountId, userId }, data: { mediaSyncLeaseUntil: null, mediaReauthorizationRequired: false } });
+        await transaction.socialSyncRun.update({ where: { id: run.id }, data: {
+          status: invalidRecords ? "partial" : edgeHasMore ? "partial" : "succeeded", finishedAt: fetchedAt,
+          recordsRead: response.data!.length, errorCode: invalidRecords ? "invalid_media_records" : null,
+        } });
+      });
+      const result = await this.listMedia(userId, accountId);
+      return { outcome: "succeeded" as const, pageRecordsRead: response.data.length, hasMore: edgeHasMore, ...result };
+    } catch (error) {
+      const errorCode = error instanceof MetaIntegrationError || error instanceof MetaApiError ? error.code : "internal_error";
+      const failedAt = new Date();
+      await this.db.$transaction(async transaction => {
+        await transaction.socialAccount.updateMany({ where: { id: accountId, userId }, data: {
+          mediaSyncLeaseUntil: null,
+          ...(errorCode === "token_invalid" ? { mediaReauthorizationRequired: true } : {}),
+        } });
+        await transaction.instagramMediaSyncState.update({
+          where: { socialAccountId: accountId }, data: {
+            status: errorCode === "cursor_invalid" ? "cursor_invalid" : errorCode === "token_invalid" ? "reauthorization_required" : "failed",
+            ...(errorCode === "cursor_invalid" ? { nextCursor: null, hasMore: false, completedAt: null } : {}),
+            lastAttemptAt: failedAt, lastErrorCode: errorCode,
+          },
+        });
+        await transaction.socialSyncRun.update({ where: { id: run.id }, data: { status: "failed", finishedAt: failedAt, errorCode } });
+      });
+      const outcome = errorCode === "rate_limited" ? "rate_limited" : errorCode === "token_invalid" ? "reauthorization_required" : errorCode === "cursor_invalid" ? "cursor_invalid" : "failed";
+      return { outcome, errorCode, ...(await this.listMedia(userId, accountId)) };
+    }
+  }
+
+  private parseInstagramMedia(media: InstagramMediaObject, fetchedAt: Date) {
+    if (typeof media.id !== "string" || !media.id || typeof media.media_type !== "string" || !MEDIA_TYPES.has(media.media_type)) return null;
+    const nullableString = (value: unknown) => typeof value === "string" ? value : null;
+    const publishedAt = typeof media.timestamp === "string" ? new Date(media.timestamp) : null;
+    return {
+      providerMediaId: media.id,
+      caption: nullableString(media.caption),
+      publishedAt: publishedAt && Number.isFinite(publishedAt.getTime()) ? publishedAt : null,
+      permalink: nullableString(media.permalink),
+      mediaType: media.media_type,
+      mediaProductType: nullableString(media.media_product_type),
+      mediaUrl: safeMetaMediaUrl(media.media_url),
+      thumbnailUrl: safeMetaMediaUrl(media.thumbnail_url),
+      returnedFields: ["id", "caption", "timestamp", "permalink", "media_type", "media_url", "thumbnail_url", "media_product_type"].filter(field => Object.hasOwn(media, field)),
+      source: "instagram_graph_api",
+      apiVersion: this.configuration().graphVersion ?? "v26.0",
+      fetchedAt,
+    };
+  }
+
+  private parseInstagramMediaAsset(media: InstagramMediaObject, position: number, fetchedAt: Date) {
+    if (typeof media.id !== "string" || !media.id || typeof media.media_type !== "string" || !MEDIA_TYPES.has(media.media_type)) return null;
+    return {
+      providerMediaId: media.id, position, mediaType: media.media_type,
+      mediaUrl: safeMetaMediaUrl(media.media_url), thumbnailUrl: safeMetaMediaUrl(media.thumbnail_url),
+      returnedFields: ["id", "media_type", "media_url", "thumbnail_url"].filter(field => Object.hasOwn(media, field)),
+      source: "instagram_graph_api", apiVersion: this.configuration().graphVersion ?? "v26.0", fetchedAt,
+    };
+  }
+
   private parseProfileSnapshot(response: InstagramProfileResponse) {
     const nullableString = (field: typeof INSTAGRAM_PROFILE_FIELDS[number]) => {
       const value = response[field];
@@ -486,5 +768,5 @@ export class MetaIntegrationError extends Error {
 }
 
 export class MetaApiError extends Error {
-  constructor(readonly code: string, readonly graphCode?: number) { super(code); this.name = "MetaApiError"; }
+  constructor(readonly code: string, readonly graphCode?: number, readonly unsupportedField?: string) { super(code); this.name = "MetaApiError"; }
 }

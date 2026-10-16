@@ -108,10 +108,16 @@ model SocialAccount {
   user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   syncRuns              SocialSyncRun[]
   profileSnapshot       InstagramProfileSnapshot?
+  mediaSyncState        InstagramMediaSyncState?
+  mediaPosts            InstagramMediaPost[]
+  mediaAssets           InstagramMediaAsset[]
   profileSyncLastAttemptAt DateTime? @map("profile_sync_last_attempt_at") @db.Timestamptz(3)
   profileSyncLeaseUntil DateTime? @map("profile_sync_lease_until") @db.Timestamptz(3)
   profileSyncLastErrorCode String? @map("profile_sync_last_error_code") @db.VarChar(64)
   profileReauthorizationRequired Boolean @default(false) @map("profile_reauthorization_required")
+  mediaSyncLastAttemptAt DateTime? @map("media_sync_last_attempt_at") @db.Timestamptz(3)
+  mediaSyncLeaseUntil DateTime? @map("media_sync_lease_until") @db.Timestamptz(3)
+  mediaReauthorizationRequired Boolean @default(false) @map("media_reauthorization_required")
 
   @@unique([userId, provider, providerAccountId])
   @@unique([id, userId])
@@ -142,6 +148,86 @@ model InstagramProfileSnapshot {
   @@unique([socialAccountId, userId])
   @@index([userId, fetchedAt])
   @@map("instagram_profile_snapshots")
+}
+
+model InstagramMediaSyncState {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  socialAccountId  String        @unique @map("social_account_id") @db.Uuid
+  status           String        @default("never_synced") @db.VarChar(32)
+  nextCursor       String?       @map("next_cursor") @db.Text
+  hasMore          Boolean       @default(false) @map("has_more")
+  requestedFields  String[]      @default([]) @map("requested_fields")
+  unavailableFields String[]     @default([]) @map("unavailable_fields")
+  storedCount      Int           @default(0) @map("stored_count")
+  recordsRead      Int           @default(0) @map("records_read")
+  pagesRead        Int           @default(0) @map("pages_read")
+  warningCode      String?       @map("warning_code") @db.VarChar(64)
+  lastErrorCode    String?       @map("last_error_code") @db.VarChar(64)
+  lastAttemptAt    DateTime?     @map("last_attempt_at") @db.Timestamptz(3)
+  lastSuccessAt    DateTime?     @map("last_success_at") @db.Timestamptz(3)
+  completedAt      DateTime?     @map("completed_at") @db.Timestamptz(3)
+  source           String        @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion       String        @map("api_version") @db.VarChar(16)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount    SocialAccount @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([socialAccountId, userId])
+  @@index([userId, status, lastSuccessAt])
+  @@map("instagram_media_sync_states")
+}
+
+model InstagramMediaPost {
+  id               String                 @id @default(uuid()) @db.Uuid
+  userId           String                 @map("user_id") @db.Uuid
+  socialAccountId  String                 @map("social_account_id") @db.Uuid
+  providerMediaId  String                 @map("provider_media_id") @db.VarChar(128)
+  caption          String?                @db.Text
+  publishedAt      DateTime?              @map("published_at") @db.Timestamptz(3)
+  permalink        String?                @db.Text
+  mediaType        String                 @map("media_type") @db.VarChar(32)
+  mediaProductType String?                @map("media_product_type") @db.VarChar(32)
+  mediaUrl         String?                @map("media_url") @db.Text
+  thumbnailUrl     String?                @map("thumbnail_url") @db.Text
+  returnedFields   String[]               @default([]) @map("returned_fields")
+  source           String                 @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion       String                 @map("api_version") @db.VarChar(16)
+  fetchedAt        DateTime               @map("fetched_at") @db.Timestamptz(3)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount    SocialAccount          @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  assets           InstagramMediaAsset[]
+
+  @@unique([socialAccountId, providerMediaId])
+  @@unique([id, userId, socialAccountId])
+  @@index([userId, socialAccountId, publishedAt])
+  @@map("instagram_media_posts")
+}
+
+model InstagramMediaAsset {
+  id               String            @id @default(uuid()) @db.Uuid
+  userId           String            @map("user_id") @db.Uuid
+  socialAccountId  String            @map("social_account_id") @db.Uuid
+  parentPostId     String            @map("parent_post_id") @db.Uuid
+  providerMediaId  String            @map("provider_media_id") @db.VarChar(128)
+  position         Int
+  mediaType        String            @map("media_type") @db.VarChar(32)
+  mediaUrl         String?           @map("media_url") @db.Text
+  thumbnailUrl     String?           @map("thumbnail_url") @db.Text
+  returnedFields   String[]          @default([]) @map("returned_fields")
+  source           String            @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion       String            @map("api_version") @db.VarChar(16)
+  fetchedAt        DateTime          @map("fetched_at") @db.Timestamptz(3)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount    SocialAccount     @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  parentPost       InstagramMediaPost @relation(fields: [parentPostId, userId, socialAccountId], references: [id, userId, socialAccountId], onDelete: Cascade)
+
+  @@unique([socialAccountId, providerMediaId])
+  @@unique([parentPostId, position])
+  @@index([userId, socialAccountId, parentPostId])
+  @@map("instagram_media_assets")
 }
 
 model SocialSyncRun {

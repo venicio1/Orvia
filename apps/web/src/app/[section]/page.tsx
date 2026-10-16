@@ -3,6 +3,7 @@ import { AppShell } from "@/components/app-shell";
 import { EmptySection } from "@/components/empty-section";
 import { currentProfile, currentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { InstagramPublications } from "@/components/instagram-publications";
 
 const sections: Record<string, { label: string; description: string }> = {
   mercado: { label: "Inteligência de mercado", description: "Tendências e referências aparecerão aqui quando houver fontes verificadas e dados disponíveis." },
@@ -11,6 +12,7 @@ const sections: Record<string, { label: string; description: string }> = {
   jornada: { label: "Jornada", description: "Desafios e progresso serão exibidos depois que uma jornada for criada para você." },
   planejamento: { label: "Planejamento", description: "Seu calendário aparecerá aqui quando houver itens de conteúdo registrados." },
   resultados: { label: "Resultados", description: "Métricas aparecerão quando existirem dados conectados ou registros feitos por você." },
+  publicacoes: { label: "Publicações", description: "Publicações reais disponibilizadas pela conta profissional conectada." },
   configuracoes: { label: "Configurações", description: "As preferências e integrações poderão ser configuradas nas próximas etapas." },
 };
 
@@ -22,5 +24,5 @@ export default async function SectionPage({ params }: { params: Promise<{ sectio
   if (!user) redirect("/entrar");
   if (!user.onboardingCompleted) redirect("/onboarding");
   const profile = await currentProfile();
-  return <AppShell active={section} email={user.email} professionalName={profile?.professionalName}><EmptySection {...config} /></AppShell>;
+  return <AppShell active={section} email={user.email} professionalName={profile?.professionalName}>{section === "publicacoes" ? <InstagramPublications /> : <EmptySection {...config} />}</AppShell>;
 }

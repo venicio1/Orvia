@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Activity, ArrowUpRight, BarChart3, CalendarDays, Compass, Menu, MessageCircle, Settings2, Sparkles, X } from "lucide-react";
+import { Activity, ArrowUpRight, BarChart3, CalendarDays, Compass, Images, Menu, MessageCircle, Settings2, Sparkles, X } from "lucide-react";
 import { LogoutButton } from "@/components/logout-button";
 
 const navigation = [
   { id: "inicio", label: "Visão geral", href: "/", icon: Compass },
   { id: "diagnostico", label: "Diagnóstico", href: "/diagnostico", icon: Activity },
+  { id: "publicacoes", label: "Publicações", href: "/publicacoes", icon: Images },
   { id: "mercado", label: "Inteligência de mercado", href: "/mercado", icon: BarChart3 },
   { id: "jornada", label: "Jornada", href: "/jornada", icon: Sparkles },
   { id: "planejamento", label: "Planejamento", href: "/planejamento", icon: CalendarDays },
