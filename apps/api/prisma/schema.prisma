@@ -125,6 +125,10 @@ model SocialAccount {
   mediaSyncLastAttemptAt DateTime? @map("media_sync_last_attempt_at") @db.Timestamptz(3)
   mediaSyncLeaseUntil DateTime? @map("media_sync_lease_until") @db.Timestamptz(3)
   mediaReauthorizationRequired Boolean @default(false) @map("media_reauthorization_required")
+  insightSyncStates InstagramInsightSyncState[]
+  insightSyncRuns InstagramInsightSyncRun[]
+  accountInsights InstagramAccountInsight[]
+  mediaInsights InstagramMediaInsight[]
 
   @@unique([userId, provider, providerAccountId])
   @@unique([id, userId])
@@ -205,9 +209,11 @@ model InstagramMediaPost {
   updatedAt        DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
   socialAccount    SocialAccount          @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
   assets           InstagramMediaAsset[]
+  insights         InstagramMediaInsight[]
 
   @@unique([socialAccountId, providerMediaId])
   @@unique([id, userId, socialAccountId])
+  @@unique([id, userId, socialAccountId, mediaType])
   @@index([userId, socialAccountId, publishedAt])
   @@map("instagram_media_posts")
 }
@@ -235,6 +241,100 @@ model InstagramMediaAsset {
   @@unique([parentPostId, position])
   @@index([userId, socialAccountId, parentPostId])
   @@map("instagram_media_assets")
+}
+
+model InstagramInsightSyncState {
+  id              String        @id @default(uuid()) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  socialAccountId String        @map("social_account_id") @db.Uuid
+  scope           String        @db.VarChar(16)
+  status          String        @default("never_synced") @db.VarChar(24)
+  leaseUntil      DateTime?     @map("lease_until") @db.Timestamptz(3)
+  nextSyncAt      DateTime?     @map("next_sync_at") @db.Timestamptz(3)
+  lastAttemptAt   DateTime?     @map("last_attempt_at") @db.Timestamptz(3)
+  lastSuccessAt   DateTime?     @map("last_success_at") @db.Timestamptz(3)
+  lastRunId       String?       @map("last_run_id") @db.Uuid
+  lastErrorCode   String?       @map("last_error_code") @db.VarChar(64)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount   SocialAccount @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  lastRun         InstagramInsightSyncRun? @relation("LastInsightRun", fields: [lastRunId, userId, socialAccountId], references: [id, userId, socialAccountId], onDelete: Cascade)
+
+  @@unique([socialAccountId, scope])
+  @@index([userId, socialAccountId, status, nextSyncAt])
+  @@map("instagram_insight_sync_states")
+}
+
+model InstagramInsightSyncRun {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  socialAccountId   String        @map("social_account_id") @db.Uuid
+  scope             String        @db.VarChar(16)
+  status            String        @default("running") @db.VarChar(24)
+  requestedMetrics  String[]      @default([]) @map("requested_metrics")
+  missingMetrics    String[]      @default([]) @map("missing_metrics")
+  unavailableMetrics Json         @default("{}") @map("unavailable_metrics") @db.JsonB
+  errorCode         String?       @map("error_code") @db.VarChar(64)
+  source            String        @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion        String        @map("api_version") @db.VarChar(16)
+  startedAt         DateTime      @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt        DateTime?     @map("finished_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  socialAccount     SocialAccount @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  accountInsights   InstagramAccountInsight[]
+  mediaInsights     InstagramMediaInsight[]
+  currentStates     InstagramInsightSyncState[] @relation("LastInsightRun")
+
+  @@unique([id, userId, socialAccountId])
+  @@index([userId, socialAccountId, scope, startedAt])
+  @@index([socialAccountId, status, startedAt])
+  @@map("instagram_insight_sync_runs")
+}
+
+model InstagramAccountInsight {
+  id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @map("user_id") @db.Uuid
+  socialAccountId String                 @map("social_account_id") @db.Uuid
+  syncRunId       String                 @map("sync_run_id") @db.Uuid
+  metric          String                 @db.VarChar(64)
+  value           Decimal                @db.Decimal(20, 0)
+  period          String                 @db.VarChar(16)
+  referenceDate   DateTime               @map("reference_date") @db.Date
+  collectedAt     DateTime               @map("collected_at") @db.Timestamptz(3)
+  source          String                 @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion      String                 @map("api_version") @db.VarChar(16)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount   SocialAccount          @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  syncRun         InstagramInsightSyncRun @relation(fields: [syncRunId, userId, socialAccountId], references: [id, userId, socialAccountId], onDelete: Cascade)
+
+  @@unique([socialAccountId, metric, period, referenceDate])
+  @@index([userId, socialAccountId, metric, referenceDate])
+  @@map("instagram_account_insights")
+}
+
+model InstagramMediaInsight {
+  id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @map("user_id") @db.Uuid
+  socialAccountId String                 @map("social_account_id") @db.Uuid
+  mediaPostId     String                 @map("media_post_id") @db.Uuid
+  mediaType       String                 @map("media_type") @db.VarChar(32)
+  syncRunId       String                 @map("sync_run_id") @db.Uuid
+  metric          String                 @db.VarChar(64)
+  value           Decimal                @db.Decimal(20, 0)
+  period          String                 @db.VarChar(16)
+  referenceDate   DateTime               @map("reference_date") @db.Date
+  collectedAt     DateTime               @map("collected_at") @db.Timestamptz(3)
+  source          String                 @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion      String                 @map("api_version") @db.VarChar(16)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  syncRun         InstagramInsightSyncRun @relation(fields: [syncRunId, userId, socialAccountId], references: [id, userId, socialAccountId], onDelete: Cascade)
+  socialAccount   SocialAccount          @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+  mediaPost       InstagramMediaPost     @relation(fields: [mediaPostId, userId, socialAccountId, mediaType], references: [id, userId, socialAccountId, mediaType], onDelete: Cascade)
+
+  @@unique([syncRunId, mediaPostId, metric, period])
+  @@index([userId, socialAccountId, mediaPostId, metric, collectedAt])
+  @@map("instagram_media_insights")
 }
 
 model SocialSyncRun {
