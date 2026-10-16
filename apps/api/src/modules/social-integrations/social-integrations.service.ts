@@ -9,11 +9,25 @@ const META_CALLBACK_PATH = "/api/integrations/meta/callback";
 const OAUTH_TTL_MS = 10 * 60 * 1000;
 const PAGE_DISCOVERY_TTL_MS = 10 * 60 * 1000;
 const PAGE_DISCOVERY_MAX_ATTEMPTS = 5;
+const PROFILE_SYNC_COOLDOWN_MS = 30_000;
+const PROFILE_SYNC_LEASE_MS = 30_000;
+const INSTAGRAM_PROFILE_FIELDS = ["username", "name", "biography", "profile_picture_url", "followers_count", "follows_count", "media_count", "website"] as const;
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 type MetaPage = { id?: string; name?: string; access_token?: string; instagram_business_account?: { id?: string; username?: string } | null };
 type GraphError = { error?: { type?: string; code?: number; message?: string } };
 type MetaPagesResponse = { data: MetaPage[]; paging?: { next?: string; cursors?: { after?: string } } };
+type InstagramProfileResponse = {
+  id?: string;
+  username?: unknown;
+  name?: unknown;
+  biography?: unknown;
+  profile_picture_url?: unknown;
+  followers_count?: unknown;
+  follows_count?: unknown;
+  media_count?: unknown;
+  website?: unknown;
+};
 
 @Injectable()
 export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy {
@@ -64,7 +78,16 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     });
     const accounts = await this.db.socialAccount.findMany({
       where: { userId, provider: META_PROVIDER, status: { not: "disconnected" } },
-      select: { id: true, providerAccountId: true, pageName: true, username: true, grantedScopes: true, tokenExpiresAt: true, status: true, connectedAt: true, disconnectedAt: true },
+      select: {
+        id: true, providerAccountId: true, pageName: true, username: true, grantedScopes: true, tokenExpiresAt: true,
+        status: true, connectedAt: true, disconnectedAt: true, profileReauthorizationRequired: true,
+        profileSnapshot: { select: {
+          username: true, name: true, biography: true, profilePictureUrl: true, followersCount: true,
+          followsCount: true, mediaCount: true, website: true, returnedFields: true, source: true, apiVersion: true, fetchedAt: true,
+        } },
+        syncRuns: { where: { operation: "instagram_profile" }, orderBy: { startedAt: "desc" }, take: 1,
+          select: { status: true, startedAt: true, finishedAt: true, errorCode: true } },
+      },
       orderBy: { connectedAt: "desc" },
     });
     return {
@@ -100,10 +123,10 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     return { authorizationUrl: authorization.toString() };
   }
 
-  private async graphJson<T>(url: URL): Promise<T> {
+  private async graphJson<T>(url: URL, bearerToken?: string): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(url, { method: "GET", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json" } });
+      response = await fetch(url, { method: "GET", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json", ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}) } });
     } catch {
       throw new MetaApiError("graph_transport_error");
     }
@@ -111,6 +134,7 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     if (!response.ok || !data || data.error) {
       const graphCode = data?.error?.code;
       if (graphCode === 10 || graphCode === 200) throw new MetaIntegrationError("insufficient_permissions");
+      if (response.status === 429 || [4, 17, 32, 613].includes(graphCode ?? -1)) throw new MetaApiError("rate_limited", graphCode);
       throw new MetaApiError(graphCode === 190 ? "token_invalid" : `graph_http_${response.status}`, graphCode);
     }
     return data as T;
@@ -239,7 +263,8 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
             update: {
               pageId: page.id!, pageName: page.name ?? null, username: page.instagram_business_account!.username ?? null,
               grantedScopes: scopes, accessTokenCiphertext: encryptMetaToken(page.access_token!, config.encryptionKey!),
-              tokenExpiresAt, status: "connected", disconnectedAt: null,
+              tokenExpiresAt, status: "connected", disconnectedAt: null, profileSyncLeaseUntil: null,
+              profileSyncLastErrorCode: null, profileReauthorizationRequired: false,
             },
             select: { id: true },
           });
@@ -329,7 +354,8 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
         update: {
           pageId: page.id!, pageName: page.name ?? null, username: instagram.username ?? null, grantedScopes: [...granted],
           accessTokenCiphertext: encryptMetaToken(page.access_token!, config.encryptionKey!), tokenExpiresAt: null,
-          status: "connected", disconnectedAt: null,
+          status: "connected", disconnectedAt: null, profileSyncLeaseUntil: null,
+          profileSyncLastErrorCode: null, profileReauthorizationRequired: false,
         },
         select: { id: true },
       });
@@ -350,12 +376,108 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     await this.db.$transaction(async transaction => {
       const result = await transaction.socialAccount.updateMany({
         where: { id: accountId, userId, provider: META_PROVIDER, status: { not: "disconnected" } },
-        data: { accessTokenCiphertext: null, grantedScopes: [], status: "disconnected", disconnectedAt: new Date() },
+        data: { accessTokenCiphertext: null, grantedScopes: [], status: "disconnected", disconnectedAt: new Date(), profileSyncLeaseUntil: null },
       });
       if (result.count !== 1) throw new ConflictException({ code: "social_account_not_found", message: "Esta conta conectada não foi encontrada." });
+      await transaction.instagramProfileSnapshot.deleteMany({ where: { socialAccountId: accountId, userId } });
       await transaction.socialSyncRun.create({ data: { userId, socialAccountId: accountId, provider: META_PROVIDER, operation: "disconnect", status: "succeeded", finishedAt: new Date() } });
     });
     return { message: "A conexão foi removida e a credencial armazenada foi apagada." };
+  }
+
+  async syncProfile(userId: string, accountId: string) {
+    const config = this.configuration();
+    if (!config.encryptionKey || !config.graphVersion) return { outcome: "meta_not_configured" as const };
+    const now = new Date();
+    const allowedSince = new Date(now.getTime() - PROFILE_SYNC_COOLDOWN_MS);
+    const leaseUntil = new Date(now.getTime() + PROFILE_SYNC_LEASE_MS);
+    const claim = await this.db.socialAccount.updateMany({
+      where: {
+        id: accountId, userId, provider: META_PROVIDER, status: "connected",
+        OR: [{ profileSyncLeaseUntil: null }, { profileSyncLeaseUntil: { lt: now } }],
+        AND: [{ OR: [{ profileSyncLastAttemptAt: null }, { profileSyncLastAttemptAt: { lt: allowedSince } }] }],
+      },
+      data: { profileSyncLeaseUntil: leaseUntil, profileSyncLastAttemptAt: now },
+    });
+    if (claim.count !== 1) return { outcome: "throttled" as const, ...(await this.readProfileStatus(userId, accountId)) };
+
+    const run = await this.db.socialSyncRun.create({ data: {
+      userId, socialAccountId: accountId, provider: META_PROVIDER, operation: "instagram_profile", status: "running", startedAt: now,
+    }, select: { id: true } });
+    try {
+      const account = await this.db.socialAccount.findFirst({
+        where: { id: accountId, userId, provider: META_PROVIDER, status: "connected" },
+        select: { id: true, providerAccountId: true, accessTokenCiphertext: true },
+      });
+      if (!account || !account.accessTokenCiphertext) throw new MetaIntegrationError("connected_account_unavailable");
+      if (!/^\d{1,32}$/.test(account.providerAccountId)) throw new MetaIntegrationError("invalid_instagram_account_id");
+      const token = decryptMetaToken(account.accessTokenCiphertext, config.encryptionKey);
+      const url = new URL(`https://graph.facebook.com/${config.graphVersion}/${account.providerAccountId}`);
+      url.searchParams.set("fields", `id,${INSTAGRAM_PROFILE_FIELDS.join(",")}`);
+      const response = await this.graphJson<InstagramProfileResponse>(url, token);
+      if (response.id !== account.providerAccountId) throw new MetaIntegrationError("profile_account_mismatch");
+      const snapshotData = this.parseProfileSnapshot(response);
+      const fetchedAt = new Date();
+      await this.db.$transaction(async transaction => {
+        await transaction.instagramProfileSnapshot.upsert({
+          where: { socialAccountId: accountId },
+          create: { userId, socialAccountId: accountId, ...snapshotData, source: "instagram_graph_api", apiVersion: config.graphVersion!, fetchedAt },
+          update: { ...snapshotData, source: "instagram_graph_api", apiVersion: config.graphVersion!, fetchedAt },
+        });
+        await transaction.socialAccount.updateMany({ where: { id: accountId, userId }, data: { profileSyncLeaseUntil: null, profileSyncLastErrorCode: null, profileReauthorizationRequired: false } });
+        await transaction.socialSyncRun.update({ where: { id: run.id }, data: { status: "succeeded", finishedAt: fetchedAt, recordsRead: 1, errorCode: null } });
+      });
+      return { outcome: "succeeded" as const, ...(await this.readProfileStatus(userId, accountId)) };
+    } catch (error) {
+      const errorCode = error instanceof MetaIntegrationError || error instanceof MetaApiError ? error.code : "internal_error";
+      const failedAt = new Date();
+      await this.db.$transaction(async transaction => {
+        await transaction.socialAccount.updateMany({ where: { id: accountId, userId }, data: {
+          profileSyncLeaseUntil: null, profileSyncLastErrorCode: errorCode,
+          ...(errorCode === "token_invalid" ? { profileReauthorizationRequired: true } : {}),
+        } });
+        await transaction.socialSyncRun.update({ where: { id: run.id }, data: { status: "failed", finishedAt: failedAt, errorCode } });
+      });
+      return { outcome: errorCode === "rate_limited" ? "rate_limited" as const : "failed" as const, errorCode, ...(await this.readProfileStatus(userId, accountId)) };
+    }
+  }
+
+  private parseProfileSnapshot(response: InstagramProfileResponse) {
+    const nullableString = (field: typeof INSTAGRAM_PROFILE_FIELDS[number]) => {
+      const value = response[field];
+      if (value === undefined || value === null) return null;
+      if (typeof value !== "string") throw new MetaIntegrationError("invalid_profile_payload");
+      return value;
+    };
+    const nullableCount = (field: "followers_count" | "follows_count" | "media_count") => {
+      const value = response[field];
+      if (value === undefined || value === null) return null;
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) throw new MetaIntegrationError("invalid_profile_payload");
+      return value;
+    };
+    const returnedFields = INSTAGRAM_PROFILE_FIELDS.filter(field => Object.hasOwn(response, field));
+    return {
+      username: nullableString("username"), name: nullableString("name"), biography: nullableString("biography"),
+      profilePictureUrl: nullableString("profile_picture_url"), followersCount: nullableCount("followers_count"),
+      followsCount: nullableCount("follows_count"), mediaCount: nullableCount("media_count"), website: nullableString("website"),
+      returnedFields: [...returnedFields],
+    };
+  }
+
+  private async readProfileStatus(userId: string, accountId: string) {
+    const account = await this.db.socialAccount.findFirst({
+      where: { id: accountId, userId, provider: META_PROVIDER },
+      select: {
+        profileSnapshot: { select: {
+          username: true, name: true, biography: true, profilePictureUrl: true, followersCount: true,
+          followsCount: true, mediaCount: true, website: true, returnedFields: true, source: true, apiVersion: true, fetchedAt: true,
+        } }, profileReauthorizationRequired: true,
+        syncRuns: { where: { operation: "instagram_profile" }, orderBy: { startedAt: "desc" }, take: 1,
+          select: { status: true, startedAt: true, finishedAt: true, errorCode: true } },
+      },
+    });
+    if (!account) return { profile: null, lastSync: null, reauthorizationRequired: false };
+    return { profile: account.profileSnapshot, lastSync: account.syncRuns[0] ?? null, reauthorizationRequired: account.profileReauthorizationRequired };
   }
 }
 

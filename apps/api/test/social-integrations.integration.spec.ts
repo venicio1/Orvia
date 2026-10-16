@@ -36,7 +36,7 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
       { access_token: "short-lived-user-token", expires_in: 3600 },
       { access_token: "long-lived-user-token", expires_in: 3600 },
       { data: META_READ_SCOPES.map(permission => ({ permission, status: "granted" })) },
-      { data: [{ id: "test-page-id", name: "Conta de teste", access_token: "page-token-for-test", instagram_business_account: { id: "test-ig-account-id", username: "orvia.qa" } }] },
+      { data: [{ id: "test-page-id", name: "Conta de teste", access_token: "page-token-for-test", instagram_business_account: { id: "17841400000000001", username: "orvia.qa" } }] },
     ];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(responses.shift()), { status: 200, headers: { "content-type": "application/json" } })));
 
@@ -44,13 +44,21 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
     const state = new URL(started.authorizationUrl).searchParams.get("state")!;
     expect(await social.complete(first.id, session.id, state, "test-authorization-code")).toBe("connected");
 
-    const account = await db.socialAccount.findUniqueOrThrow({ where: { userId_provider_providerAccountId: { userId: first.id, provider: "instagram_facebook_login", providerAccountId: "test-ig-account-id" } } });
+    const account = await db.socialAccount.findUniqueOrThrow({ where: { userId_provider_providerAccountId: { userId: first.id, provider: "instagram_facebook_login", providerAccountId: "17841400000000001" } } });
     expect(account.status).toBe("connected");
     expect(account.grantedScopes).toEqual([...META_READ_SCOPES]);
     expect(account.accessTokenCiphertext).not.toContain("page-token-for-test");
     expect(decryptMetaToken(account.accessTokenCiphertext!, key)).toBe("page-token-for-test");
     expect(await db.socialSyncRun.count({ where: { userId: first.id, socialAccountId: account.id, status: "succeeded" } })).toBe(1);
     await expect(db.socialSyncRun.create({ data: { userId: second.id, socialAccountId: account.id, provider: "instagram_facebook_login", operation: "ownership_probe", status: "succeeded" } })).rejects.toMatchObject({ code: "P2003" });
+
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ id: "17841400000000001", username: "orvia.qa", name: "Orvia QA", biography: "Conta de teste", followers_count: 0, follows_count: 0, media_count: 0, website: null }), { status: 200, headers: { "content-type": "application/json" } })));
+    const profileSync = await social.syncProfile(first.id, account.id);
+    expect(profileSync.outcome).toBe("succeeded");
+    const profileSnapshot = await db.instagramProfileSnapshot.findUniqueOrThrow({ where: { socialAccountId: account.id } });
+    expect(profileSnapshot).toMatchObject({ userId: first.id, socialAccountId: account.id, username: "orvia.qa", followersCount: 0, source: "instagram_graph_api", apiVersion: "v99.0", returnedFields: expect.arrayContaining(["username", "followers_count"]) });
+    expect((await social.syncProfile(second.id, account.id)).outcome).toBe("throttled");
+    expect(await db.instagramProfileSnapshot.findFirst({ where: { socialAccountId: account.id, userId: second.id } })).toBeNull();
 
     await expect(social.disconnect(second.id, account.id)).rejects.toMatchObject({ response: { code: "social_account_not_found" } });
 
@@ -59,7 +67,7 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
       { access_token: "long-fallback-user-token", expires_in: 3600 },
       { data: META_READ_SCOPES.map(permission => ({ permission, status: "granted" })) },
       { data: [] },
-      { id: "1234567890123456", name: "Conta de teste", access_token: "page-token-from-fallback", instagram_business_account: { id: "test-ig-account-id", username: "orvia.qa" } },
+      { id: "1234567890123456", name: "Conta de teste", access_token: "page-token-from-fallback", instagram_business_account: { id: "17841400000000001", username: "orvia.qa" } },
     ];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(fallbackResponses.shift()), { status: 200, headers: { "content-type": "application/json" } })));
     const fallbackStart = await social.begin(first.id, session.id);
@@ -77,5 +85,6 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
     await social.disconnect(first.id, account.id);
     const disconnected = await db.socialAccount.findUniqueOrThrow({ where: { id: account.id } });
     expect(disconnected).toMatchObject({ status: "disconnected", accessTokenCiphertext: null, grantedScopes: [] });
+    expect(await db.instagramProfileSnapshot.findUnique({ where: { socialAccountId: account.id } })).toBeNull();
   });
 });

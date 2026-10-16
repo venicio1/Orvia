@@ -62,6 +62,19 @@ export class SocialIntegrationsController {
     return this.integrations.connectPageById(session.userId, session.id, body.pageId);
   }
 
+  @Post("accounts/:id/profile/sync")
+  async syncProfile(
+    @Req() req: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) accountId: string,
+    @Headers("x-csrf-token") csrf: string | undefined,
+    @Headers("origin") origin: string | undefined,
+  ) {
+    this.originCheck(origin);
+    const session = await this.session(req);
+    this.csrf(req, csrf);
+    return this.integrations.syncProfile(session.userId, accountId);
+  }
+
   @Get("callback")
   async callback(
     @Req() req: SessionRequest,

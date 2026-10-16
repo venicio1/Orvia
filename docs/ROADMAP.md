@@ -50,6 +50,10 @@
 
 **Pendências antes de produção e de fases de coleta:** App Review/Advanced Access e Business Verification conforme requisitos vigentes; política de privacidade e exclusão aplicável à conexão; operação de segredos, backups e deploy; estratégia de reautorização quando Meta invalidar ou revogar tokens. Insights, Business Discovery, hashtag search, fontes de mercado e IA permanecem fora desta fase e exigem revisão técnica e autorização próprias.
 
+### Fase 1D.1 — Leitura do perfil profissional Instagram
+
+Leitura somente da conta profissional conectada pela Graph API oficial, usando o Page Access Token cifrado já armazenado. Solicita `username`, `name`, `biography`, `profile_picture_url`, `followers_count`, `follows_count`, `media_count` e `website`, sem novas permissões, Insights, publicações ou dados de terceiros. Persiste o snapshot atual com fonte, versão Graph, campos efetivamente retornados e horário. Falhas não desfazem OAuth nem sobrescrevem snapshot válido; atualização manual é protegida por sessão/CSRF, intervalo e trava por conta. Dados não alimentam diagnóstico nem recomendações. Estado: implementação e validação local concluídas; publicação em `main` nesta execução. A Fase 1D.2 não foi iniciada.
+
 ## Fase 2 — Consolidação
 
 Calendário completo, analytics avançado, relatórios mensais, notificações, administração minimizada e planos/limites. Cobranças reais dependem de autorização explícita.

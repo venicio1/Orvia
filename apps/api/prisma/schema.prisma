@@ -107,11 +107,41 @@ model SocialAccount {
   updatedAt             DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
   user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   syncRuns              SocialSyncRun[]
+  profileSnapshot       InstagramProfileSnapshot?
+  profileSyncLastAttemptAt DateTime? @map("profile_sync_last_attempt_at") @db.Timestamptz(3)
+  profileSyncLeaseUntil DateTime? @map("profile_sync_lease_until") @db.Timestamptz(3)
+  profileSyncLastErrorCode String? @map("profile_sync_last_error_code") @db.VarChar(64)
+  profileReauthorizationRequired Boolean @default(false) @map("profile_reauthorization_required")
 
   @@unique([userId, provider, providerAccountId])
   @@unique([id, userId])
   @@index([userId, provider, status])
   @@map("social_accounts")
+}
+
+model InstagramProfileSnapshot {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  socialAccountId   String        @unique @map("social_account_id") @db.Uuid
+  username          String?       @db.VarChar(255)
+  name              String?       @db.VarChar(255)
+  biography         String?       @db.Text
+  profilePictureUrl String?       @map("profile_picture_url") @db.Text
+  followersCount    Int?          @map("followers_count")
+  followsCount      Int?          @map("follows_count")
+  mediaCount        Int?          @map("media_count")
+  website           String?       @db.Text
+  returnedFields    String[]      @default([]) @map("returned_fields")
+  source            String        @default("instagram_graph_api") @db.VarChar(64)
+  apiVersion        String        @map("api_version") @db.VarChar(16)
+  fetchedAt         DateTime      @map("fetched_at") @db.Timestamptz(3)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  socialAccount     SocialAccount @relation(fields: [socialAccountId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([socialAccountId, userId])
+  @@index([userId, fetchedAt])
+  @@map("instagram_profile_snapshots")
 }
 
 model SocialSyncRun {

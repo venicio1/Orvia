@@ -22,6 +22,8 @@ function fakeDatabase() {
   const upsert = vi.fn(async (args: unknown) => ({ id: args ? "social-account-id" : "unused-id" }));
   const updateMany = vi.fn(async () => ({ count: 1 }));
   const runCreate = vi.fn(async () => ({ id: "sync-run-id" }));
+  const runUpdate = vi.fn(async () => ({ id: "sync-run-id" }));
+  const snapshotDeleteMany = vi.fn(async () => ({ count: 0 }));
   const db = {
     metaOAuthAttempt: {
       deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -50,13 +52,15 @@ function fakeDatabase() {
     },
     socialAccount: {
       findMany: vi.fn(async () => []),
+      findFirst: vi.fn(async () => null),
       updateMany,
     },
-    socialSyncRun: { create: runCreate },
-    $transaction: vi.fn(async (callback: (transaction: unknown) => unknown) => callback({ socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate } })),
+    instagramProfileSnapshot: { deleteMany: snapshotDeleteMany },
+    socialSyncRun: { create: runCreate, update: runUpdate },
+    $transaction: vi.fn(async (callback: (transaction: unknown) => unknown) => callback({ socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany } })),
   } as unknown as PrismaService;
   const transaction = async (callback: (transaction: unknown) => unknown) => callback({
-    socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate }, metaOAuthAttempt: { update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { attempt = { ...attempt!, ...data }; return attempt; }) },
+    socialAccount: { upsert, updateMany }, socialSyncRun: { create: runCreate, update: runUpdate }, instagramProfileSnapshot: { deleteMany: snapshotDeleteMany }, metaOAuthAttempt: { update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => { attempt = { ...attempt!, ...data }; return attempt; }) },
   });
   (db as unknown as { $transaction: typeof transaction }).$transaction = vi.fn(transaction);
   return { db, upsert, runCreate };
