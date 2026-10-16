@@ -75,6 +75,19 @@ export class SocialIntegrationsController {
     return this.integrations.syncProfile(session.userId, accountId);
   }
 
+  @Post("accounts/:id/insights/reauthorize")
+  async reauthorizeInsights(
+    @Req() req: SessionRequest,
+    @Param("id", new ParseUUIDPipe()) accountId: string,
+    @Headers("x-csrf-token") csrf: string | undefined,
+    @Headers("origin") origin: string | undefined,
+  ) {
+    this.originCheck(origin);
+    const session = await this.session(req);
+    this.csrf(req, csrf);
+    return this.integrations.beginInsightsReauthorization(session.userId, session.id, accountId);
+  }
+
   @Get("accounts/:id/media")
   async listMedia(
     @Req() req: SessionRequest,

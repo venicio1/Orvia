@@ -17,7 +17,7 @@ Não envie App Secret, token ou chave de cifragem pelo chat. Configure-os direta
 5. Preencha domínios do app e configure os campos exigidos pelo painel: URL pública de política de privacidade, instruções/URL de exclusão de dados, contato, categoria e dados empresariais. Não publique o app antes de esses destinos estarem acessíveis e refletirem os dados realmente tratados pelo Orvia.
 6. Em App Roles/Roles, adicione sua conta Facebook como Developer/Admin/Tester e permita testar o produto. Em uma conta de teste controlada, converta/vincule o Instagram como Business ou Creator e associe-o a uma Facebook Page que o mesmo usuário possa administrar.
 7. Na configuração Facebook Login for Business, selecione o tipo **User access token**. O OAuth do Orvia usa `config_id`; as permissões são definidas nesta configuração no painel, portanto o app não envia `scope` na URL de autorização.
-8. A configuração atual `Orvia - Instagram Connection` informada pelo proprietário deve manter tipo **User access token** e somente `pages_show_list`, `instagram_basic` e `pages_read_engagement`. A configuração anterior `Orvia - Instagram Insights` com `instagram_manage_insights` não substitui essas permissões e ainda não é usada. Preserve-a para uma etapa futura de Insights. Não adicione permissões de mensagem, publicação ou anúncios.
+8. A configuração principal `Orvia - Instagram Connection` deve manter tipo **User access token** e somente `pages_show_list`, `instagram_basic` e `pages_read_engagement`. O fluxo separado de reautorização usa `Orvia - Instagram Insights` com essas três permissões e `instagram_manage_insights`; ele não altera nem substitui a configuração principal. Não adicione permissões de mensagem, publicação ou anúncios.
 9. Em **App settings → Basic**, copie App ID e App Secret; o App ID é identificador público, mas o App Secret é privado. Copie também o Configuration ID da configuração de conexão. Preencha-os apenas em `apps/api/.env`. A versão Graph configurada localmente é `v26.0`, a versão atual indicada pela documentação Meta nesta revisão; reavalie ao atualizar a integração.
 10. Gere uma chave independente para cifrar tokens. O comando abaixo grava a chave diretamente em `apps/api/.env` e imprime somente uma confirmação, sem exibir o valor. Execute na raiz do repositório:
 
@@ -31,6 +31,7 @@ Não envie App Secret, token ou chave de cifragem pelo chat. Configure-os direta
    META_APP_ID=<App ID do painel>
    META_APP_SECRET=<App Secret do painel>
    META_LOGIN_CONFIG_ID=<Configuration ID do Facebook Login for Business>
+   META_INSIGHTS_LOGIN_CONFIG_ID=<Configuration ID da configuração Orvia - Instagram Insights>
    META_GRAPH_API_VERSION=v26.0
    META_REDIRECT_URI=http://localhost:3000/api/integrations/meta/callback
    META_TOKEN_ENCRYPTION_KEY=<chave-base64-32-bytes-gerada-localmente>
@@ -46,7 +47,7 @@ O proprietário deve conferir, pois não é possível verificar remotamente o es
 - O aplicativo está em modo Development ou Live correto e quais funções de usuário conseguem autorizar.
 - Cada permissão mostra Standard ou Advanced Access, elegibilidade, revisão pendente/aprovada e, se aplicável, requisito de Business Verification.
 - Se Hashtag Search e Business Discovery estão disponíveis para o app atual e qual permissão/feature específica é exigida. Não tratar o endpoint listado na documentação como autorização concedida.
-- `instagram_manage_insights` não é pedido nesta entrega. Solicitar/revisar antes de qualquer chamada de Insights.
+- A reautorização dedicada solicita `instagram_manage_insights` apenas pela configuração Insights. Esta entrega ainda não consulta métricas; a concessão do escopo só habilita a credencial para uma etapa posterior.
 - A conta selecionada é profissional e vinculada à Page correta, e o usuário do fluxo tem tarefa/acesso suficiente à Page.
 - O callback OAuth usado no fluxo coincide byte a byte com `META_REDIRECT_URI`; para localhost em Development a Meta informa autorização automática, enquanto produção usa HTTPS e domínio verificado.
 - Limites efetivos, versão da API, retenção, exclusão, atribuição e uso permitido conforme os termos em vigor.

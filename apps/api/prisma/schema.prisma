@@ -79,13 +79,19 @@ model MetaOAuthAttempt {
   pageDiscoveryExpiresAt DateTime? @map("page_discovery_expires_at") @db.Timestamptz(3)
   pageDiscoveryConsumedAt DateTime? @map("page_discovery_consumed_at") @db.Timestamptz(3)
   pageDiscoveryAttempts Int @default(0) @map("page_discovery_attempts")
+  intent      String    @default("connection") @db.VarChar(40)
+  targetSocialAccountId String? @map("target_social_account_id") @db.Uuid
+  expectedPageId String? @map("expected_page_id") @db.VarChar(128)
+  expectedInstagramAccountId String? @map("expected_instagram_account_id") @db.VarChar(128)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   session     Session   @relation(fields: [sessionId, userId], references: [id, userId], onDelete: Cascade)
+  targetSocialAccount SocialAccount? @relation("InsightsReauthorizationAccount", fields: [targetSocialAccountId, userId], references: [id, userId], onDelete: Cascade)
 
   @@index([userId, expiresAt])
   @@index([sessionId, expiresAt])
   @@index([userId, pageDiscoveryExpiresAt])
+  @@index([targetSocialAccountId, expiresAt])
   @@map("meta_oauth_attempts")
 }
 
@@ -111,6 +117,7 @@ model SocialAccount {
   mediaSyncState        InstagramMediaSyncState?
   mediaPosts            InstagramMediaPost[]
   mediaAssets           InstagramMediaAsset[]
+  reauthorizationAttempts MetaOAuthAttempt[] @relation("InsightsReauthorizationAccount")
   profileSyncLastAttemptAt DateTime? @map("profile_sync_last_attempt_at") @db.Timestamptz(3)
   profileSyncLeaseUntil DateTime? @map("profile_sync_lease_until") @db.Timestamptz(3)
   profileSyncLastErrorCode String? @map("profile_sync_last_error_code") @db.VarChar(64)

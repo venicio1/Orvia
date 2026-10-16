@@ -80,8 +80,9 @@ function metaResponses() {
 }
 
 function stubMetaFetch(responses: unknown[]) {
-  const mock = vi.fn(async (input: RequestInfo | URL) => {
+  const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     void input;
+    void init;
     const result = responses.shift();
     return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
   });
@@ -207,7 +208,8 @@ describe("Meta social connection foundation", () => {
     const pageRequest = new URL(String(fetch.mock.calls[4]?.[0]));
     expect(pageRequest.pathname).toMatch(/\/1234567890123456$/);
     expect(pageRequest.searchParams.get("fields")).toContain("access_token");
-    expect(pageRequest.searchParams.get("access_token")).toBe("long-user-token");
+    expect(pageRequest.searchParams.has("access_token")).toBe(false);
+    expect(fetch.mock.calls[4]?.[1]?.headers).toMatchObject({ authorization: "Bearer long-user-token" });
     const upsertArgs = upsert.mock.calls[0]?.[0] as { create: { accessTokenCiphertext: string } };
     expect(decryptMetaToken(upsertArgs.create.accessTokenCiphertext, key)).toBe("page-access-token");
     expect(JSON.stringify(result)).not.toContain("access_token");

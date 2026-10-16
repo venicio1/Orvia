@@ -36,7 +36,7 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
       { access_token: "short-lived-user-token", expires_in: 3600 },
       { access_token: "long-lived-user-token", expires_in: 3600 },
       { data: META_READ_SCOPES.map(permission => ({ permission, status: "granted" })) },
-      { data: [{ id: "test-page-id", name: "Conta de teste", access_token: "page-token-for-test", instagram_business_account: { id: "17841400000000001", username: "orvia.qa" } }] },
+      { data: [{ id: "111111111111111", name: "Conta de teste", access_token: "page-token-for-test", instagram_business_account: { id: "17841400000000001", username: "orvia.qa" } }] },
     ];
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(responses.shift()), { status: 200, headers: { "content-type": "application/json" } })));
 
@@ -70,6 +70,39 @@ describe.skipIf(!enabled)("Meta connection persistence and ownership (PostgreSQL
     expect(storedMedia).toHaveLength(2);
     expect(storedMedia.find(item => item.providerMediaId === "test-carousel")?.assets).toHaveLength(1);
     expect(await db.instagramMediaSyncState.findUniqueOrThrow({ where: { socialAccountId: account.id } })).toMatchObject({ userId: first.id, status: "succeeded", storedCount: 2, source: "instagram_graph_api" });
+
+    vi.stubEnv("META_INSIGHTS_LOGIN_CONFIG_ID", "test-insights-config-id");
+    const reauthorizationResponses = [
+      { access_token: "reauthorization-short-user-token" },
+      { access_token: "reauthorization-long-user-token" },
+      { data: [...META_READ_SCOPES, "instagram_manage_insights"].map(permission => ({ permission, status: "granted" })) },
+      { data: [{ id: "111111111111111", name: "Conta de teste", access_token: "reauthorized-page-token", instagram_business_account: { id: "17841400000000001", username: "orvia.qa" } }] },
+    ];
+    const reauthorizationFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify(reauthorizationResponses.shift()), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", reauthorizationFetch);
+    const profileBeforeReauthorization = await db.instagramProfileSnapshot.findUniqueOrThrow({ where: { socialAccountId: account.id } });
+    const postsBeforeReauthorization = await db.instagramMediaPost.count({ where: { userId: first.id, socialAccountId: account.id } });
+    const insightAuth = await social.beginInsightsReauthorization(first.id, session.id, account.id);
+    const insightState = new URL(insightAuth.authorizationUrl).searchParams.get("state")!;
+    expect(new URL(insightAuth.authorizationUrl).searchParams.get("config_id")).toBe("test-insights-config-id");
+    expect(await social.complete(first.id, session.id, insightState, "test-insights-authorization-code")).toBe("insights_reauthorized");
+    const reauthorizedAccount = await db.socialAccount.findUniqueOrThrow({ where: { id: account.id } });
+    expect(reauthorizedAccount.id).toBe(account.id);
+    expect(reauthorizedAccount.grantedScopes).toEqual([...META_READ_SCOPES, "instagram_manage_insights"]);
+    expect(decryptMetaToken(reauthorizedAccount.accessTokenCiphertext!, key)).toBe("reauthorized-page-token");
+    expect(await db.instagramProfileSnapshot.findUniqueOrThrow({ where: { socialAccountId: account.id } })).toEqual(profileBeforeReauthorization);
+    expect(await db.instagramMediaPost.count({ where: { userId: first.id, socialAccountId: account.id } })).toBe(postsBeforeReauthorization);
+    for (const [input] of reauthorizationFetch.mock.calls) {
+      const url = new URL(String(input));
+      expect(url.searchParams.has("access_token")).toBe(false);
+      expect(url.searchParams.has("client_secret")).toBe(false);
+      expect(url.searchParams.has("code")).toBe(false);
+    }
+
     await expect(db.instagramMediaPost.create({ data: {
       userId: second.id, socialAccountId: account.id, providerMediaId: "cross-user-post", mediaType: "IMAGE",
       source: "instagram_graph_api", apiVersion: "v99.0", fetchedAt: new Date(),

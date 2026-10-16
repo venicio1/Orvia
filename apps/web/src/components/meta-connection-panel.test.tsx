@@ -62,6 +62,25 @@ describe("MetaConnectionPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/Páginas acessíveis, mas nenhuma retornou uma conta Instagram profissional/i);
   });
 
+  it("offers dedicated Insights reauthorization only when configured and reports initiation errors", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response({ configured: true, insightsConfigured: true, requiredScopes: [], optionalFutureScopes: [], accounts: [{ id: "account-insights", providerAccountId: "ig-1", pageName: "Página de teste", username: "orvia_teste", grantedScopes: ["instagram_basic"], tokenExpiresAt: null, status: "connected", connectedAt: "2026-10-15T12:00:00.000Z", profileReauthorizationRequired: false, profileSnapshot: { username: "orvia_teste", returnedFields: ["username"], source: "instagram_graph_api", apiVersion: "v26.0", fetchedAt: "2026-10-15T12:00:00.000Z" }, syncRuns: [] }] }))
+      .mockResolvedValueOnce(response({ message: "A autorização não pôde ser iniciada." }, 503));
+    vi.stubGlobal("fetch", fetch);
+    render(<MetaConnectionPanel />);
+    const button = await screen.findByRole("button", { name: /Autorizar Insights/i });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent("A autorização não pôde ser iniciada.");
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/integrations/meta/accounts/account-insights/insights/reauthorize", expect.objectContaining({ method: "POST", credentials: "same-origin" }));
+  });
+
+  it("does not offer Insights reauthorization when the dedicated configuration is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response({ configured: true, insightsConfigured: false, requiredScopes: [], optionalFutureScopes: [], accounts: [{ id: "account-insights", providerAccountId: "ig-1", pageName: "Página de teste", username: "orvia_teste", grantedScopes: [], tokenExpiresAt: null, status: "connected", connectedAt: "2026-10-15T12:00:00.000Z", profileReauthorizationRequired: false, profileSnapshot: { username: "orvia_teste", returnedFields: ["username"], source: "instagram_graph_api", apiVersion: "v26.0", fetchedAt: "2026-10-15T12:00:00.000Z" }, syncRuns: [] }] })));
+    render(<MetaConnectionPanel />);
+    expect(await screen.findByRole("button", { name: /Autorizar Insights/i })).toBeDisabled();
+  });
+
   it("offers Page ID validation only after the provider returned an empty Page list", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(response({ configured: true, requiredScopes: [], optionalFutureScopes: [], accounts: [] }))

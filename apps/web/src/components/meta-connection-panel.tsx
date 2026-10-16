@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
-import { AtSign, Check, ExternalLink, LoaderCircle, LockKeyhole, RefreshCw, Unplug } from "lucide-react";
+import { AtSign, BarChart3, Check, ExternalLink, LoaderCircle, LockKeyhole, RefreshCw, Unplug } from "lucide-react";
 import { csrfToken } from "@/lib/csrf";
 
 type ConnectedAccount = {
@@ -24,7 +24,7 @@ type ProfileSnapshot = {
   returnedFields: string[]; source: string; apiVersion: string; fetchedAt: string;
 };
 type ProfileSyncRun = { status: string; startedAt: string; finishedAt: string | null; errorCode: string | null };
-type ConnectionStatus = { configured: boolean; requiredScopes: string[]; optionalFutureScopes: string[]; accounts: ConnectedAccount[] };
+type ConnectionStatus = { configured: boolean; insightsConfigured?: boolean; requiredScopes: string[]; optionalFutureScopes: string[]; accounts: ConnectedAccount[] };
 type LoadState = "loading" | "ready" | "error";
 
 const messages: Record<string, { kind: "success" | "error"; text: string }> = {
@@ -39,6 +39,12 @@ const messages: Record<string, { kind: "success" | "error"; text: string }> = {
   graph_api_error: { kind: "error", text: "A Graph API da Meta não concluiu a consulta. Nenhuma conta foi salva; tente novamente e, se persistir, confira os detalhes técnicos registrados sem tokens ou dados de conta." },
   not_configured: { kind: "error", text: "A configuração da aplicação Meta está incompleta neste ambiente." },
   failed: { kind: "error", text: "O Orvia encontrou um erro interno ao registrar a integração. Nenhuma conta foi salva. Tente novamente mais tarde." },
+  insights_reauthorized: { kind: "success", text: "A autorização de leitura de Insights foi concluída para a conta conectada. Nenhuma métrica foi consultada nesta etapa." },
+  insights_denied: { kind: "error", text: "A autorização de Insights foi cancelada ou recusada. A conexão e os dados existentes foram preservados." },
+  insights_missing_permissions: { kind: "error", text: "A Meta não concedeu todas as permissões necessárias. A conexão e os dados existentes foram preservados." },
+  insights_account_mismatch: { kind: "error", text: "A Página ou conta Instagram autorizada não corresponde à conexão existente. Nenhum dado foi alterado." },
+  insights_not_configured: { kind: "error", text: "A configuração separada de autorização de Insights não está disponível neste ambiente." },
+  insights_failed: { kind: "error", text: "Não foi possível validar a nova autorização. A credencial e os dados anteriores foram preservados." },
 };
 
 function trustedMetaImageUrl(value: string | null | undefined) {
@@ -132,6 +138,21 @@ export function MetaConnectionPanel({ callbackResult }: { callbackResult?: strin
       window.location.assign(result.authorizationUrl);
     } catch (cause) {
       setNotice({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível iniciar a conexão." });
+      setBusy(null);
+    }
+  }
+
+  async function reauthorizeInsights(account: ConnectedAccount) {
+    setBusy(`insights-${account.id}`); setNotice(null);
+    try {
+      const response = await fetch(`/api/integrations/meta/accounts/${encodeURIComponent(account.id)}/insights/reauthorize`, {
+        method: "POST", credentials: "same-origin", headers: { "x-csrf-token": csrfToken() },
+      });
+      const result = await response.json().catch(() => null) as { authorizationUrl?: string; message?: string } | null;
+      if (!response.ok || !result?.authorizationUrl) throw new Error(result?.message ?? "Não foi possível iniciar a autorização de Insights.");
+      window.location.assign(result.authorizationUrl);
+    } catch (cause) {
+      setNotice({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível iniciar a autorização de Insights." });
       setBusy(null);
     }
   }
@@ -234,6 +255,12 @@ export function MetaConnectionPanel({ callbackResult }: { callbackResult?: strin
           <button className="integration-button disconnect" disabled={busy !== null} onClick={() => void disconnect(account)} aria-label={`Desconectar ${account.username ? `@${account.username}` : account.pageName ?? "conta"}`}>
             {busy === account.id ? <LoaderCircle size={15} className="spin" /> : <Unplug size={15} />} Desconectar
           </button>
+          {account.grantedScopes.includes("instagram_manage_insights")
+            ? <span className="integration-scope-badge"><BarChart3 size={14} aria-hidden="true" /> Insights autorizados</span>
+            : <button className="integration-button secondary" disabled={busy !== null || !status.insightsConfigured} onClick={() => void reauthorizeInsights(account)}>
+              {busy === `insights-${account.id}` ? <LoaderCircle size={14} className="spin" /> : <BarChart3 size={14} />}
+              Autorizar Insights
+            </button>}
           <section className="instagram-profile-card" aria-label={`Perfil Instagram ${account.username ? `@${account.username}` : "conectado"}`}>
             <div className="instagram-profile-heading">
               <div className="instagram-profile-avatar">

@@ -5,6 +5,8 @@ import { decryptMetaToken, encryptMetaToken } from "./token-crypto";
 
 export const META_PROVIDER = "instagram_facebook_login";
 export const META_READ_SCOPES = ["pages_show_list", "instagram_basic", "pages_read_engagement"] as const;
+export const META_INSIGHTS_SCOPE = "instagram_manage_insights" as const;
+const META_KNOWN_SCOPES = [...META_READ_SCOPES, META_INSIGHTS_SCOPE] as const;
 const META_CALLBACK_PATH = "/api/integrations/meta/callback";
 const OAUTH_TTL_MS = 10 * 60 * 1000;
 const PAGE_DISCOVERY_TTL_MS = 10 * 60 * 1000;
@@ -87,14 +89,17 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     const encryptionKey = process.env.META_TOKEN_ENCRYPTION_KEY?.trim();
     const graphVersion = process.env.META_GRAPH_API_VERSION?.trim();
     const loginConfigId = process.env.META_LOGIN_CONFIG_ID?.trim();
+    const insightsLoginConfigId = process.env.META_INSIGHTS_LOGIN_CONFIG_ID?.trim();
     const webUrl = process.env.WEB_PUBLIC_URL ?? "http://localhost:3000";
     const expectedRedirect = new URL(META_CALLBACK_PATH, webUrl).toString();
     const graphVersionValid = Boolean(graphVersion && /^v\d+\.\d+$/.test(graphVersion));
     const keyValid = (() => {
       try { return Boolean(encryptionKey && Buffer.from(encryptionKey, "base64").length === 32); } catch { return false; }
     })();
-    const configured = Boolean(appId && appSecret && loginConfigId && redirectUri === expectedRedirect && graphVersionValid && keyValid);
-    return { appId, appSecret, loginConfigId, redirectUri, encryptionKey, graphVersion, configured, expectedRedirect };
+    const commonConfigured = Boolean(appId && appSecret && redirectUri === expectedRedirect && graphVersionValid && keyValid);
+    const configured = Boolean(commonConfigured && loginConfigId);
+    const insightsConfigured = Boolean(commonConfigured && insightsLoginConfigId);
+    return { appId, appSecret, loginConfigId, insightsLoginConfigId, redirectUri, encryptionKey, graphVersion, configured, insightsConfigured, expectedRedirect };
   }
 
   async status(userId: string) {
@@ -119,6 +124,7 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     });
     return {
       configured: config.configured,
+      insightsConfigured: config.insightsConfigured,
       provider: META_PROVIDER,
       requiredScopes: META_READ_SCOPES,
       optionalFutureScopes: ["instagram_manage_insights"],
@@ -150,10 +156,38 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     return { authorizationUrl: authorization.toString() };
   }
 
-  private async graphJson<T>(url: URL, bearerToken?: string): Promise<T> {
+  async beginInsightsReauthorization(userId: string, sessionId: string, accountId: string) {
+    const config = this.configuration();
+    if (!config.insightsConfigured || !config.appId || !config.insightsLoginConfigId || !config.redirectUri || !config.graphVersion) {
+      throw new ServiceUnavailableException({ code: "meta_insights_not_configured", message: "A autorização de Insights ainda não está configurada neste ambiente." });
+    }
+    const account = await this.db.socialAccount.findFirst({
+      where: { id: accountId, userId, provider: META_PROVIDER, status: "connected" },
+      select: { id: true, pageId: true, providerAccountId: true, accessTokenCiphertext: true },
+    });
+    if (!account?.accessTokenCiphertext || !/^\d{1,32}$/.test(account.pageId) || !/^\d{1,32}$/.test(account.providerAccountId)) {
+      throw new ConflictException({ code: "social_account_not_found", message: "A conta conectada não está disponível para reautorização." });
+    }
+
+    const state = randomBytes(32).toString("base64url");
+    await this.db.metaOAuthAttempt.create({ data: {
+      userId, sessionId, stateHash: sha256(state), expiresAt: new Date(Date.now() + OAUTH_TTL_MS),
+      intent: "insights_reauthorization", targetSocialAccountId: account.id,
+      expectedPageId: account.pageId, expectedInstagramAccountId: account.providerAccountId,
+    } });
+    const authorization = new URL(`https://www.facebook.com/${config.graphVersion}/dialog/oauth`);
+    authorization.searchParams.set("client_id", config.appId);
+    authorization.searchParams.set("redirect_uri", config.redirectUri);
+    authorization.searchParams.set("response_type", "code");
+    authorization.searchParams.set("config_id", config.insightsLoginConfigId);
+    authorization.searchParams.set("state", state);
+    return { authorizationUrl: authorization.toString() };
+  }
+
+  private async graphJson<T>(url: URL, bearerToken?: string, body?: URLSearchParams): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(url, { method: "GET", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json", ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}) } });
+      response = await fetch(url, { method: body ? "POST" : "GET", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(12_000), headers: { accept: "application/json", ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}), ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}) }, ...(body ? { body: body.toString() } : {}) });
     } catch {
       throw new MetaApiError("graph_transport_error");
     }
@@ -211,33 +245,25 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     const config = this.configuration();
     if (!config.appId || !config.appSecret || !config.redirectUri || !config.graphVersion) throw new MetaIntegrationError("meta_not_configured");
     const exchange = new URL(`https://graph.facebook.com/${config.graphVersion}/oauth/access_token`);
-    exchange.searchParams.set("client_id", config.appId);
-    exchange.searchParams.set("client_secret", config.appSecret);
-    exchange.searchParams.set("redirect_uri", config.redirectUri);
-    exchange.searchParams.set("code", code);
-    const shortToken = await this.graphJson<{ access_token: string }>(exchange);
+    const shortToken = await this.graphJson<{ access_token: string }>(exchange, undefined, new URLSearchParams({
+      client_id: config.appId, client_secret: config.appSecret, redirect_uri: config.redirectUri, code,
+    }));
     if (!shortToken.access_token) throw new MetaIntegrationError("token_exchange_failed");
 
     // Exchange the login token for a longer-lived user token before resolving Pages.
     const longLived = new URL(`https://graph.facebook.com/${config.graphVersion}/oauth/access_token`);
-    longLived.searchParams.set("grant_type", "fb_exchange_token");
-    longLived.searchParams.set("client_id", config.appId);
-    longLived.searchParams.set("client_secret", config.appSecret);
-    longLived.searchParams.set("fb_exchange_token", shortToken.access_token);
-    const longToken = await this.graphJson<{ access_token: string }>(longLived);
+    const longToken = await this.graphJson<{ access_token: string }>(longLived, undefined, new URLSearchParams({
+      grant_type: "fb_exchange_token", client_id: config.appId, client_secret: config.appSecret, fb_exchange_token: shortToken.access_token,
+    }));
     if (!longToken.access_token) throw new MetaIntegrationError("token_exchange_failed");
     return longToken.access_token;
   }
 
-  private async getPages(token: string) {
+  private async getPages(token: string, requiredScopes: readonly (typeof META_KNOWN_SCOPES[number])[] = META_READ_SCOPES) {
     const config = this.configuration();
     if (!config.graphVersion) throw new MetaIntegrationError("meta_not_configured");
-    const permissionsUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me/permissions`);
-    permissionsUrl.searchParams.set("access_token", token);
-    const permissionResponse = await this.graphJson<{ data?: Array<{ permission: string; status: string }> }>(permissionsUrl);
-    if (!Array.isArray(permissionResponse.data)) throw new MetaApiError("graph_invalid_permissions_response");
-    const granted = new Set(permissionResponse.data.filter(item => item.status === "granted").map(item => item.permission));
-    const missingScopes = META_READ_SCOPES.filter(scope => !granted.has(scope));
+    const granted = await this.getGrantedScopes(token);
+    const missingScopes = requiredScopes.filter(scope => !granted.includes(scope));
     if (missingScopes.length > 0) throw new MetaIntegrationError("required_scope_missing");
 
     const pages: MetaPage[] = [];
@@ -246,9 +272,8 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
       const pagesUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me/accounts`);
       pagesUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account{id,username}");
       pagesUrl.searchParams.set("limit", "100");
-      pagesUrl.searchParams.set("access_token", token);
       if (cursor) pagesUrl.searchParams.set("after", cursor);
-      const result = await this.graphJson<MetaPagesResponse>(pagesUrl);
+      const result = await this.graphJson<MetaPagesResponse>(pagesUrl, token);
       if (!Array.isArray(result.data)) throw new MetaApiError("graph_invalid_pages_response");
       pages.push(...result.data);
       if (!result.paging?.next) break;
@@ -263,8 +288,116 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
       pages: [...new Map(linkedPages.map(page => [page.instagram_business_account!.id!, page])).values()],
       pagesRead: pages.length,
       pagesWithoutInstagram: pages.length - linkedPages.length,
-      scopes: META_READ_SCOPES.filter(scope => granted.has(scope)),
+      scopes: granted,
     };
+  }
+
+  private async getGrantedScopes(token: string) {
+    const config = this.configuration();
+    if (!config.graphVersion) throw new MetaIntegrationError("meta_not_configured");
+    const permissionsUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me/permissions`);
+    const permissionResponse = await this.graphJson<{ data?: Array<{ permission: string; status: string }> }>(permissionsUrl, token);
+    if (!Array.isArray(permissionResponse.data)) throw new MetaApiError("graph_invalid_permissions_response");
+    const granted = new Set(permissionResponse.data.filter(item => item.status === "granted").map(item => item.permission));
+    return META_KNOWN_SCOPES.filter(scope => granted.has(scope));
+  }
+
+  private async getReauthorizationPage(token: string, pageId: string, instagramAccountId: string) {
+    const config = this.configuration();
+    if (!config.graphVersion) throw new MetaIntegrationError("meta_not_configured");
+    const pagesUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me/accounts`);
+    pagesUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account{id,username}");
+    pagesUrl.searchParams.set("limit", "100");
+    const result = await this.graphJson<MetaPagesResponse>(pagesUrl, token);
+    if (!Array.isArray(result.data)) throw new MetaApiError("graph_invalid_pages_response");
+
+    if (result.data.length === 0 && !result.paging?.next) {
+      const pageUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/${pageId}`);
+      pageUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account{id,username}");
+      const page = await this.graphJson<MetaPage>(pageUrl, token);
+      if (page.id !== pageId || !page.access_token) throw new MetaIntegrationError("insights_page_not_authorized");
+      if (page.instagram_business_account?.id !== instagramAccountId) throw new MetaIntegrationError("insights_account_mismatch");
+      return page;
+    }
+
+    const pages = [...result.data];
+    let cursor = result.paging?.cursors?.after;
+    for (let pageNumber = 1; result.paging?.next && pageNumber < 20; pageNumber += 1) {
+      if (!cursor) throw new MetaIntegrationError("page_cursor_missing");
+      const nextUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/me/accounts`);
+      nextUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account{id,username}");
+      nextUrl.searchParams.set("limit", "100");
+      nextUrl.searchParams.set("after", cursor);
+      const next = await this.graphJson<MetaPagesResponse>(nextUrl, token);
+      if (!Array.isArray(next.data)) throw new MetaApiError("graph_invalid_pages_response");
+      pages.push(...next.data);
+      cursor = next.paging?.cursors?.after;
+      if (!next.paging?.next) break;
+      if (pageNumber === 19) throw new MetaIntegrationError("page_list_limit_exceeded");
+    }
+    const page = pages.find(candidate => candidate.id === pageId);
+    if (!page) throw new MetaIntegrationError("insights_page_not_authorized");
+    if (page.instagram_business_account?.id !== instagramAccountId) throw new MetaIntegrationError("insights_account_mismatch");
+    if (!page.access_token) throw new MetaIntegrationError("page_access_token_missing");
+    return page;
+  }
+
+  private async completeInsightsReauthorization(userId: string, attempt: {
+    id: string; targetSocialAccountId?: string | null; expectedPageId?: string | null; expectedInstagramAccountId?: string | null;
+  }, code: string) {
+    const config = this.configuration();
+    const accountId = attempt.targetSocialAccountId;
+    const fail = async (errorCode: string) => {
+      await this.db.socialSyncRun.create({ data: {
+        userId, socialAccountId: accountId ?? null, provider: META_PROVIDER,
+        operation: "oauth_insights_reauthorization", status: "failed", finishedAt: new Date(), errorCode,
+      } });
+      return errorCode === "required_scope_missing" || errorCode === "insufficient_permissions" ? "insights_missing_permissions" as const
+        : errorCode === "insights_account_mismatch" || errorCode === "insights_page_not_authorized" ? "insights_account_mismatch" as const
+        : errorCode === "authorization_denied" ? "insights_denied" as const
+        : errorCode === "meta_insights_not_configured" ? "insights_not_configured" as const
+        : "insights_failed" as const;
+    };
+    if (!config.insightsConfigured || !config.encryptionKey) return fail("meta_insights_not_configured");
+    if (!accountId || !attempt.expectedPageId || !attempt.expectedInstagramAccountId) return fail("insights_attempt_invalid");
+
+    const account = await this.db.socialAccount.findFirst({
+      where: { id: accountId, userId, provider: META_PROVIDER, status: "connected" },
+      select: { id: true, pageId: true, providerAccountId: true, accessTokenCiphertext: true },
+    });
+    if (!account?.accessTokenCiphertext) return fail("insights_account_unavailable");
+    if (account.pageId !== attempt.expectedPageId || account.providerAccountId !== attempt.expectedInstagramAccountId) return fail("insights_account_mismatch");
+
+    try {
+      const userToken = await this.exchangeCode(code);
+      const scopes = await this.getGrantedScopes(userToken);
+      const required = [...META_READ_SCOPES, META_INSIGHTS_SCOPE];
+      if (required.some(scope => !scopes.includes(scope))) return fail("required_scope_missing");
+      const page = await this.getReauthorizationPage(userToken, attempt.expectedPageId, attempt.expectedInstagramAccountId);
+      const encrypted = encryptMetaToken(page.access_token!, config.encryptionKey);
+      const updated = await this.db.$transaction(async transaction => {
+        const result = await transaction.socialAccount.updateMany({
+          where: {
+            id: accountId, userId, provider: META_PROVIDER, status: "connected",
+            pageId: attempt.expectedPageId!, providerAccountId: attempt.expectedInstagramAccountId!,
+            accessTokenCiphertext: account.accessTokenCiphertext,
+          },
+          data: { accessTokenCiphertext: encrypted, grantedScopes: scopes },
+        });
+        if (result.count !== 1) return false;
+        await transaction.socialSyncRun.create({ data: {
+          userId, socialAccountId: accountId, provider: META_PROVIDER,
+          operation: "oauth_insights_reauthorization", status: "succeeded", finishedAt: new Date(), recordsRead: 1,
+        } });
+        return true;
+      });
+      if (!updated) return fail("insights_account_changed");
+      return "insights_reauthorized" as const;
+    } catch (error) {
+      const errorCode = error instanceof MetaIntegrationError || error instanceof MetaApiError ? error.code : "internal_error";
+      if (errorCode === "token_invalid") return fail(errorCode);
+      return fail(errorCode);
+    }
   }
 
   private async recordFailedRun(userId: string, errorCode: string, recordsRead = 0) {
@@ -279,14 +412,25 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     const consumed = await this.db.metaOAuthAttempt.updateMany({ where: { id: attempt.id, userId, sessionId, consumedAt: null, expiresAt: { gt: now } }, data: { consumedAt: now } });
     if (consumed.count !== 1) return "invalid_state" as const;
     if (oauthError) {
+      if (attempt.intent === "insights_reauthorization") {
+        await this.db.socialSyncRun.create({ data: { userId, socialAccountId: attempt.targetSocialAccountId, provider: META_PROVIDER, operation: "oauth_insights_reauthorization", status: "cancelled", finishedAt: now, errorCode: "authorization_denied" } });
+        return "insights_denied" as const;
+      }
       await this.recordFailedRun(userId, "authorization_denied");
       return "denied" as const;
     }
     if (!code || code.length > 4096) {
+      if (attempt.intent === "insights_reauthorization") {
+        await this.db.socialSyncRun.create({ data: { userId, socialAccountId: attempt.targetSocialAccountId, provider: META_PROVIDER, operation: "oauth_insights_reauthorization", status: "failed", finishedAt: now, errorCode: "authorization_code_missing" } });
+        return "insights_failed" as const;
+      }
       await this.recordFailedRun(userId, "authorization_code_missing");
       return "failed" as const;
     }
     const config = this.configuration();
+    if (attempt.intent === "insights_reauthorization") {
+      return this.completeInsightsReauthorization(userId, attempt, code);
+    }
     if (!config.configured || !config.encryptionKey) {
       await this.recordFailedRun(userId, "meta_not_configured");
       return "not_configured" as const;
@@ -388,10 +532,9 @@ export class SocialIntegrationsService implements OnModuleInit, OnModuleDestroy 
     const userToken = decryptMetaToken(attempt.pageDiscoveryTokenCiphertext, config.encryptionKey);
     const pageUrl = new URL(`https://graph.facebook.com/${config.graphVersion}/${pageId}`);
     pageUrl.searchParams.set("fields", "id,name,access_token,instagram_business_account{id,username}");
-    pageUrl.searchParams.set("access_token", userToken);
     let page: MetaPage;
     try {
-      page = await this.graphJson<MetaPage>(pageUrl);
+      page = await this.graphJson<MetaPage>(pageUrl, userToken);
     } catch (error) {
       const code = error instanceof MetaApiError ? error.code : error instanceof MetaIntegrationError ? error.code : "internal_error";
       await this.recordFailedRun(userId, code, 0);
